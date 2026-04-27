@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Realtime Script",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/realtime/onset_pitch_realtime.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
+        }
+    ]
+}
