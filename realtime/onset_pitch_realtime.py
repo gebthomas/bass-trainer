@@ -98,6 +98,7 @@ def cleanup_audio(metronome_instance=None):
     except Exception:
         pass
     time.sleep(0.2)
+    print("Audio cleanup complete.")
 
 
 def play_click(frequency=1000, duration=0.04, volume=0.4):
@@ -368,8 +369,7 @@ except KeyboardInterrupt:
 else:
     interrupted = False
 finally:
-    if METRONOME_ENABLED and metronome is not None:
-        metronome.stop()
+    cleanup_audio(metronome)
     if CALIBRATION_MODE and not interrupted:
         calibration_errors = [r["raw_timing_error_ms"] for r in results if "raw_timing_error_ms" in r]
         run_calibration_summary(calibration_errors)
