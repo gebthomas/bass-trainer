@@ -40,6 +40,7 @@ COUNT_IN_FIRST_BEAT_FREQ = 1200
 COUNT_IN_REGULAR_BEAT_FREQ = 800
 PLAY_FIRST_BEAT_FREQ = 1200
 PLAY_REGULAR_BEAT_FREQ = 800
+TIMING_OFFSET_MS = -150
 
 start_time = None
 last_onset_time = -999
@@ -55,8 +56,7 @@ audio_buffer_lock = threading.Lock()
 def play_click(frequency=1000, duration=0.04, volume=0.4):
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
     click = volume * np.sin(2 * np.pi * frequency * t)
-    sd.play(click, SAMPLE_RATE)
-    sd.wait()
+    sd.play(click, SAMPLE_RATE, blocking=False)
 
 class Metronome:
     def __init__(self, bpm, mode="count_in_and_click", count_in_beats=4,
@@ -132,13 +132,15 @@ def print_summary(results):
         print("No notes evaluated.")
         return
 
-    errors = [r["timing_error_ms"] for r in results]
+    raw_errors = [r["raw_timing_error_ms"] for r in results]
+    corrected_errors = [r["corrected_timing_error_ms"] for r in results]
     pitch_accuracy = sum(r["pitch_ok"] for r in results) / len(results) * 100
 
     print("\nSession summary")
     print(f"Notes evaluated: {len(results)}")
-    print(f"Average timing error: {np.mean(errors):+.1f} ms")
-    print(f"Average absolute timing error: {np.mean(np.abs(errors)):.1f} ms")
+    print(f"Average raw timing error: {np.mean(raw_errors):+.1f} ms")
+    print(f"Average corrected timing error: {np.mean(corrected_errors):+.1f} ms")
+    print(f"Average absolute corrected timing error: {np.mean(np.abs(corrected_errors)):.1f} ms")
     print(f"Pitch accuracy: {pitch_accuracy:.1f}%")
 
 def estimate_pitch(segment):
@@ -262,12 +264,13 @@ try:
                                 target = targets[current_target_index]
                                 current_target_index += 1
 
-                                error = timing_error_ms(onset_time, target["time"])
+                                raw_error = timing_error_ms(onset_time, target["time"])
+                                corrected_error = raw_error + TIMING_OFFSET_MS
                                 pitch_ok = compare_note(note, target["note"])
 
-                                if abs(error) < 30:
+                                if abs(corrected_error) < 30:
                                     timing_label = "tight"
-                                elif abs(error) < 80:
+                                elif abs(corrected_error) < 80:
                                     timing_label = "ok"
                                 else:
                                     timing_label = "off"
@@ -275,7 +278,8 @@ try:
                                 print(
                                     f"    Target {target['note']} @ {target['time']:.3f}s | "
                                     f"Played {note} @ {onset_time:.3f}s | "
-                                    f"{error:+d} ms | "
+                                    f"raw {raw_error:+d} ms | "
+                                    f"corr {corrected_error:+d} ms | "
                                     f"pitch {'OK' if pitch_ok else 'WRONG'} | "
                                     f"timing {timing_label}"
                                 )
@@ -284,7 +288,8 @@ try:
                                     "target_time": target["time"],
                                     "played_note": note,
                                     "played_time": onset_time,
-                                    "timing_error_ms": error,
+                                    "raw_timing_error_ms": raw_error,
+                                    "corrected_timing_error_ms": corrected_error,
                                     "pitch_ok": pitch_ok,
                                     "timing_label": timing_label
                                 })
