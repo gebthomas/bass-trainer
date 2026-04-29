@@ -87,6 +87,19 @@ def run_calibration_summary(calibration_errors):
     print(f"Saved TIMING_OFFSET_MS = {timing_offset_ms:+.1f} ms to {CALIBRATION_CONFIG_PATH}")
 
 
+def cleanup_audio(metronome_instance=None):
+    if METRONOME_ENABLED and metronome_instance is not None:
+        try:
+            metronome_instance.stop()
+        except Exception:
+            pass
+    try:
+        sd.stop()
+    except Exception:
+        pass
+    time.sleep(0.2)
+
+
 def play_click(frequency=1000, duration=0.04, volume=0.4):
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
     click = volume * np.sin(2 * np.pi * frequency * t)
