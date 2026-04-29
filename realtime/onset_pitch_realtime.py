@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 import json
+import csv
+from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -28,6 +30,9 @@ HISTORY_BLOCKS = 3
 
 PITCH_DELAY_SEC = 0.08
 PITCH_WINDOW_SEC = 0.12
+MATCH_WINDOW_FRACTION = 0.40
+MIN_MATCH_WINDOW_SEC = 0.12
+MAX_MATCH_WINDOW_SEC = 0.40
 
 current_target_index = 0
 
@@ -44,6 +49,7 @@ PLAY_FIRST_BEAT_FREQ = 1200
 PLAY_REGULAR_BEAT_FREQ = 800
 TIMING_OFFSET_MS = -150
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
+RESULTS_DIR = PROJECT_ROOT / "results"
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
 
 start_time = None
@@ -87,6 +93,28 @@ def run_calibration_summary(calibration_errors):
     print(f"Saved TIMING_OFFSET_MS = {timing_offset_ms:+.1f} ms to {CALIBRATION_CONFIG_PATH}")
 
 
+def get_match_window(target_index, targets):
+    prev_gap = None
+    next_gap = None
+
+    if target_index > 0:
+        prev_gap = targets[target_index]["time"] - targets[target_index - 1]["time"]
+    if target_index + 1 < len(targets):
+        next_gap = targets[target_index + 1]["time"] - targets[target_index]["time"]
+
+    if prev_gap is not None and next_gap is not None:
+        local_gap = min(prev_gap, next_gap)
+    elif prev_gap is not None:
+        local_gap = prev_gap
+    elif next_gap is not None:
+        local_gap = next_gap
+    else:
+        local_gap = MAX_MATCH_WINDOW_SEC
+
+    window = local_gap * MATCH_WINDOW_FRACTION
+    return max(MIN_MATCH_WINDOW_SEC, min(MAX_MATCH_WINDOW_SEC, window))
+
+
 def cleanup_audio(metronome_instance=None):
     if METRONOME_ENABLED and metronome_instance is not None:
         try:
@@ -99,6 +127,109 @@ def cleanup_audio(metronome_instance=None):
         pass
     time.sleep(0.2)
     print("Audio cleanup complete.")
+
+
+def append_extra_result(note, onset_time):
+    results.append({
+        "event_type": "extra",
+        "target_note": "",
+        "target_time": "",
+        "played_note": note,
+        "played_time": onset_time,
+        "raw_timing_error_ms": "",
+        "corrected_timing_error_ms": "",
+        "pitch_ok": False,
+        "timing_label": "extra",
+    })
+
+
+def append_missed_target_result(target):
+    results.append({
+        "event_type": "missed",
+        "target_note": target["note"],
+        "target_time": target["time"],
+        "played_note": "",
+        "played_time": "",
+        "raw_timing_error_ms": "",
+        "corrected_timing_error_ms": "",
+        "pitch_ok": False,
+        "timing_label": "missed",
+    })
+
+
+def append_hit_result(target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note):
+    results.append({
+        "event_type": "hit",
+        "target_note": target["note"],
+        "target_time": target["time"],
+        "played_note": note,
+        "played_time": onset_time,
+        "raw_timing_error_ms": raw_error,
+        "corrected_timing_error_ms": corrected_error,
+        "pitch_ok": pitch_ok,
+        "timing_label": timing_label,
+    })
+
+
+def finalize_target(target, candidates):
+    if not candidates:
+        append_missed_target_result(target)
+        return
+
+    correct_candidates = [c for c in candidates if c["pitch_ok"]]
+    if correct_candidates:
+        chosen = min(correct_candidates, key=lambda c: abs(c["corrected_error"]))
+    else:
+        chosen = min(candidates, key=lambda c: abs(c["raw_error"]))
+
+    for candidate in candidates:
+        if candidate is chosen:
+            append_hit_result(
+                target,
+                candidate["onset_time"],
+                candidate["raw_error"],
+                candidate["corrected_error"],
+                candidate["pitch_ok"],
+                candidate["timing_label"],
+                candidate["note"],
+            )
+        else:
+            append_extra_result(candidate["note"], candidate["onset_time"])
+
+
+def save_results_csv(results):
+    if not results:
+        return None
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    path = RESULTS_DIR / f"session_{timestamp}.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[
+            "event_type",
+            "target_note",
+            "target_time",
+            "played_note",
+            "played_time",
+            "raw_timing_error_ms",
+            "corrected_timing_error_ms",
+            "pitch_ok",
+            "timing_label",
+        ])
+        writer.writeheader()
+        for row in results:
+            writer.writerow({
+                "event_type": row.get("event_type"),
+                "target_note": row.get("target_note"),
+                "target_time": row.get("target_time"),
+                "played_note": row.get("played_note"),
+                "played_time": row.get("played_time"),
+                "raw_timing_error_ms": row.get("raw_timing_error_ms"),
+                "corrected_timing_error_ms": row.get("corrected_timing_error_ms"),
+                "pitch_ok": row.get("pitch_ok"),
+                "timing_label": row.get("timing_label"),
+            })
+    print(f"Saved session results to {path}")
+    return path
 
 
 def play_click(frequency=1000, duration=0.04, volume=0.4):
@@ -180,16 +311,29 @@ def print_summary(results):
         print("No notes evaluated.")
         return
 
-    raw_errors = [r["raw_timing_error_ms"] for r in results]
-    corrected_errors = [r["corrected_timing_error_ms"] for r in results]
-    pitch_accuracy = sum(r["pitch_ok"] for r in results) / len(results) * 100
+    hit_rows = [r for r in results if r.get("event_type") == "hit"]
+    missed_rows = [r for r in results if r.get("event_type") == "missed"]
+    extra_rows = [r for r in results if r.get("event_type") == "extra"]
+
+    raw_errors = [r["raw_timing_error_ms"] for r in hit_rows]
+    corrected_errors = [r["corrected_timing_error_ms"] for r in hit_rows]
+    pitch_accuracy = (sum(r["pitch_ok"] for r in hit_rows) / len(hit_rows) * 100) if hit_rows else 0.0
 
     print("\nSession summary")
-    print(f"Notes evaluated: {len(results)}")
-    print(f"Average raw timing error: {np.mean(raw_errors):+.1f} ms")
-    print(f"Average corrected timing error: {np.mean(corrected_errors):+.1f} ms")
-    print(f"Average absolute corrected timing error: {np.mean(np.abs(corrected_errors)):.1f} ms")
-    print(f"Pitch accuracy: {pitch_accuracy:.1f}%")
+    print(f"Hits/evaluated notes: {len(hit_rows)}")
+    print(f"Missed notes: {len(missed_rows)}")
+    print(f"Extra notes: {len(extra_rows)}")
+
+    if hit_rows:
+        print(f"Average raw timing error: {np.mean(raw_errors):+.1f} ms")
+        print(f"Average corrected timing error: {np.mean(corrected_errors):+.1f} ms")
+        print(f"Average absolute corrected timing error: {np.mean(np.abs(corrected_errors)):.1f} ms")
+        print(f"Pitch accuracy: {pitch_accuracy:.1f}%")
+    else:
+        print("Average raw timing error: N/A")
+        print("Average corrected timing error: N/A")
+        print("Average absolute corrected timing error: N/A")
+        print("Pitch accuracy: N/A")
 
 def estimate_pitch(segment):
     f0, voiced_flag, voiced_prob = librosa.pyin(
@@ -255,6 +399,7 @@ if CALIBRATION_MODE:
 
 current_target_index = 0
 pending_onsets.clear()
+target_candidates = []
 
 play_start_time = time.perf_counter()
 if METRONOME_ENABLED and METRONOME_MODE != "silent":
@@ -311,47 +456,52 @@ try:
                             segment = buffer_array[start_index:end_index]
                             freq, note = estimate_pitch(segment)
                             if freq is not None:
+                                while current_target_index < len(targets):
+                                    target = targets[current_target_index]
+                                    window = get_match_window(current_target_index, targets)
+                                    if onset_time > target["time"] + window:
+                                        print(f"    Missed target {target['note']} @ {target['time']:.3f}s")
+                                        finalize_target(target, target_candidates)
+                                        target_candidates = []
+                                        current_target_index += 1
+                                        continue
+                                    break
+
                                 if current_target_index >= len(targets):
                                     print(f"    Extra note at {onset_time:.3f}s: no remaining target")
+                                    append_extra_result(note, onset_time)
                                     processed_onsets.append(onset_time)
-                                    continue
-                                
-                                target = targets[current_target_index]
-                                current_target_index += 1
-
-                                raw_error = timing_error_ms(onset_time, target["time"])
-                                corrected_error = raw_error + TIMING_OFFSET_MS
-                                pitch_ok = compare_note(note, target["note"])
-
-                                if abs(corrected_error) < 30:
-                                    timing_label = "tight"
-                                elif abs(corrected_error) < 80:
-                                    timing_label = "ok"
                                 else:
-                                    timing_label = "off"
+                                    target = targets[current_target_index]
+                                    window = get_match_window(current_target_index, targets)
 
-                                print(
-                                    f"    Target {target['note']} @ {target['time']:.3f}s | "
-                                    f"Played {note} @ {onset_time:.3f}s | "
-                                    f"raw {raw_error:+.1f} ms | "
-                                    f"corr {corrected_error:+.1f} ms | "
-                                    f"pitch {'OK' if pitch_ok else 'WRONG'} | "
-                                    f"timing {timing_label}"
-                                )
-                                results.append({
-                                    "target_note": target["note"],
-                                    "target_time": target["time"],
-                                    "played_note": note,
-                                    "played_time": onset_time,
-                                    "raw_timing_error_ms": raw_error,
-                                    "corrected_timing_error_ms": corrected_error,
-                                    "pitch_ok": pitch_ok,
-                                    "timing_label": timing_label
-                                })
+                                    if onset_time < target["time"] - window:
+                                        print(f"    Extra note at {onset_time:.3f}s: before target window")
+                                        append_extra_result(note, onset_time)
+                                        processed_onsets.append(onset_time)
+                                    else:
+                                        raw_error = timing_error_ms(onset_time, target["time"])
+                                        corrected_error = raw_error + TIMING_OFFSET_MS
+                                        pitch_ok = compare_note(note, target["note"])
+
+                                        if abs(corrected_error) < 30:
+                                            timing_label = "tight"
+                                        elif abs(corrected_error) < 80:
+                                            timing_label = "ok"
+                                        else:
+                                            timing_label = "off"
+
+                                        target_candidates.append({
+                                            "onset_time": onset_time,
+                                            "note": note,
+                                            "raw_error": raw_error,
+                                            "corrected_error": corrected_error,
+                                            "pitch_ok": pitch_ok,
+                                            "timing_label": timing_label,
+                                        })
+                                        processed_onsets.append(onset_time)
                             else:
                                 print("    Pitch: no stable pitch detected")
-
-                        processed_onsets.append(onset_time)
 
                 if processed_onsets:
                     with onset_lock:
@@ -370,7 +520,14 @@ else:
     interrupted = False
 finally:
     cleanup_audio(metronome)
+    while current_target_index < len(targets):
+        finalize_target(targets[current_target_index], target_candidates)
+        target_candidates = []
+        current_target_index += 1
+
     if CALIBRATION_MODE and not interrupted:
         calibration_errors = [r["raw_timing_error_ms"] for r in results if "raw_timing_error_ms" in r]
         run_calibration_summary(calibration_errors)
     print_summary(results)
+    if not CALIBRATION_MODE and results:
+        save_results_csv(results)
