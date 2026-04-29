@@ -49,6 +49,9 @@ audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
 results = []
 
+onset_lock = threading.Lock()
+audio_buffer_lock = threading.Lock()
+
 def play_click(frequency=1000, duration=0.04, volume=0.4):
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
     click = volume * np.sin(2 * np.pi * frequency * t)
@@ -165,7 +168,8 @@ def callback(indata, frames, callback_time, status):
         print(status)
 
     audio = indata[:, CHANNEL_INDEX].copy()
-    audio_buffer.extend(audio)
+    with audio_buffer_lock:
+        audio_buffer.extend(audio)
 
     now = time.perf_counter()
     if start_time is None or now < start_time:
@@ -184,7 +188,8 @@ def callback(indata, frames, callback_time, status):
 
     if strong_enough and rising_fast and outside_refractory:
         last_onset_time = elapsed
-        pending_onsets.append(elapsed)
+        with onset_lock:
+            pending_onsets.append(elapsed)
         print(f"Onset at {elapsed:7.3f} s | peak={peak:.3f} rms={rms:.3f}")
 
     energy_history.append(rms)
@@ -229,9 +234,15 @@ try:
             if start_time is not None:
                 elapsed = now - start_time
 
-                for onset_time in pending_onsets[:]:
+                with onset_lock:
+                    pending_snapshot = list(pending_onsets)
+
+                processed_onsets = []
+                for onset_time in pending_snapshot:
                     if elapsed >= onset_time + PITCH_DELAY_SEC + PITCH_WINDOW_SEC:
-                        buffer_array = np.array(audio_buffer, dtype=np.float32)
+                        with audio_buffer_lock:
+                            buffer_snapshot = list(audio_buffer)
+                        buffer_array = np.array(buffer_snapshot, dtype=np.float32)
 
                         end_samples_back = int((elapsed - onset_time - PITCH_DELAY_SEC - PITCH_WINDOW_SEC) * SAMPLE_RATE)
                         window_samples = int(PITCH_WINDOW_SEC * SAMPLE_RATE)
@@ -245,7 +256,7 @@ try:
                             if freq is not None:
                                 if current_target_index >= len(targets):
                                     print(f"    Extra note at {onset_time:.3f}s: no remaining target")
-                                    pending_onsets.remove(onset_time)
+                                    processed_onsets.append(onset_time)
                                     continue
                                 
                                 target = targets[current_target_index]
@@ -280,7 +291,13 @@ try:
                             else:
                                 print("    Pitch: no stable pitch detected")
 
-                        pending_onsets.remove(onset_time)
+                        processed_onsets.append(onset_time)
+
+                if processed_onsets:
+                    with onset_lock:
+                        for onset_time in processed_onsets:
+                            if onset_time in pending_onsets:
+                                pending_onsets.remove(onset_time)
 
             time.sleep(0.02)
 
