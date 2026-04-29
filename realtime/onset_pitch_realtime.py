@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -32,6 +33,7 @@ current_target_index = 0
 
 METRONOME_ENABLED = True
 METRONOME_MODE = "count_in_and_click"  # options: count_in_and_click, count_in_only, silent
+CALIBRATION_MODE = False
 METRONOME_BPM = 60
 METRONOME_VOLUME = 0.35
 COUNT_IN_BEATS = 4
@@ -41,6 +43,8 @@ COUNT_IN_REGULAR_BEAT_FREQ = 800
 PLAY_FIRST_BEAT_FREQ = 1200
 PLAY_REGULAR_BEAT_FREQ = 800
 TIMING_OFFSET_MS = -150
+CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
+CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
 
 start_time = None
 last_onset_time = -999
@@ -52,6 +56,36 @@ results = []
 
 onset_lock = threading.Lock()
 audio_buffer_lock = threading.Lock()
+
+def load_calibration():
+    if CALIBRATION_CONFIG_PATH.exists():
+        try:
+            with CALIBRATION_CONFIG_PATH.open("r", encoding="utf-8") as handle:
+                config = json.load(handle)
+            return config.get("timing_offset_ms", TIMING_OFFSET_MS)
+        except Exception as ex:
+            print(f"Warning: failed to load calibration: {ex}")
+    return TIMING_OFFSET_MS
+
+
+def save_calibration(offset_ms):
+    CALIBRATION_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with CALIBRATION_CONFIG_PATH.open("w", encoding="utf-8") as handle:
+        json.dump({"timing_offset_ms": offset_ms}, handle, indent=2)
+
+
+def run_calibration_summary(calibration_errors):
+    if not calibration_errors:
+        print("No calibration notes were recorded.")
+        return
+
+    average_raw_error_ms = float(np.mean(calibration_errors))
+    timing_offset_ms = -average_raw_error_ms
+    save_calibration(timing_offset_ms)
+    print("\nCalibration complete")
+    print(f"Average raw timing error: {average_raw_error_ms:+.1f} ms")
+    print(f"Saved TIMING_OFFSET_MS = {timing_offset_ms:+.1f} ms to {CALIBRATION_CONFIG_PATH}")
+
 
 def play_click(frequency=1000, duration=0.04, volume=0.4):
     t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
@@ -199,6 +233,12 @@ def callback(indata, frames, callback_time, status):
 
 input("Press Enter when ready...")
 
+TIMING_OFFSET_MS = load_calibration()
+print(f"Loaded TIMING_OFFSET_MS = {TIMING_OFFSET_MS:+.1f} ms")
+if CALIBRATION_MODE:
+    print("Calibration mode enabled: using 8-note 60 BPM target pattern.")
+    targets = CALIBRATION_TARGETS
+
 current_target_index = 0
 pending_onsets.clear()
 
@@ -221,6 +261,7 @@ if METRONOME_ENABLED:
     metronome.start(play_start_time)
 
 print("Listening. Press Ctrl+C to stop.")
+interrupted = False
 try:
     with sd.InputStream(
         device=DEVICE_ID,
@@ -278,8 +319,8 @@ try:
                                 print(
                                     f"    Target {target['note']} @ {target['time']:.3f}s | "
                                     f"Played {note} @ {onset_time:.3f}s | "
-                                    f"raw {raw_error:+d} ms | "
-                                    f"corr {corrected_error:+d} ms | "
+                                    f"raw {raw_error:+.1f} ms | "
+                                    f"corr {corrected_error:+.1f} ms | "
                                     f"pitch {'OK' if pitch_ok else 'WRONG'} | "
                                     f"timing {timing_label}"
                                 )
@@ -304,9 +345,19 @@ try:
                             if onset_time in pending_onsets:
                                 pending_onsets.remove(onset_time)
 
+                if CALIBRATION_MODE and current_target_index >= len(targets):
+                    break
+
             time.sleep(0.02)
 
 except KeyboardInterrupt:
+    interrupted = True
+else:
+    interrupted = False
+finally:
     if METRONOME_ENABLED and metronome is not None:
         metronome.stop()
+    if CALIBRATION_MODE and not interrupted:
+        calibration_errors = [r["raw_timing_error_ms"] for r in results if "raw_timing_error_ms" in r]
+        run_calibration_summary(calibration_errors)
     print_summary(results)
