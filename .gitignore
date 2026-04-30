@@ -2,3 +2,4 @@
 data/*.wav
 experiments/*.wav
 results/*.csv
+tests/audio/*.wav
