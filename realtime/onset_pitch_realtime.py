@@ -53,8 +53,14 @@ TIMING_OFFSET_MS = -150
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
 OFFLINE_MODE = True
-OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_perfect.wav"
-OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
+#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_perfect.wav"
+#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_late_150ms.wav"
+#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_missed_first.wav"
+#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_extra_between.wav"
+#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_perfect.wav"
+OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav"
+#OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
+OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
 APPLY_CALIBRATION_IN_OFFLINE_MODE = False
 if OFFLINE_MODE:
     targets = load_targets(OFFLINE_TARGET_FILE)
