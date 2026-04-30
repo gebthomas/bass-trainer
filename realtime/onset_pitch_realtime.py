@@ -52,6 +52,12 @@ PLAY_REGULAR_BEAT_FREQ = 800
 TIMING_OFFSET_MS = -150
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
+OFFLINE_MODE = True
+OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_perfect.wav"
+OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
+APPLY_CALIBRATION_IN_OFFLINE_MODE = False
+if OFFLINE_MODE:
+    targets = load_targets(OFFLINE_TARGET_FILE)
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
 
 start_time = None
@@ -76,6 +82,38 @@ def cleanup_audio(metronome_instance=None):
         pass
     time.sleep(0.2)
     print("Audio cleanup complete.")
+
+
+def load_offline_audio():
+    audio_data, sr = librosa.load(str(OFFLINE_AUDIO_FILE), sr=SAMPLE_RATE, mono=False)
+    if audio_data.ndim > 1:
+        audio_data = audio_data[CHANNEL_INDEX]
+    return audio_data
+
+
+def process_audio_chunk(audio, elapsed):
+    global last_onset_time
+
+    with audio_buffer_lock:
+        audio_buffer.extend(audio)
+
+    rms = np.sqrt(np.mean(audio ** 2))
+    peak = np.max(np.abs(audio))
+
+    recent_energy = np.mean(energy_history) if energy_history else rms
+    time_since_last = (elapsed - last_onset_time) * 1000
+
+    strong_enough = rms > MIN_RMS
+    rising_fast = rms > recent_energy * RISE_RATIO
+    outside_refractory = time_since_last > REFRACTORY_MS
+
+    if strong_enough and rising_fast and outside_refractory:
+        last_onset_time = elapsed
+        with onset_lock:
+            pending_onsets.append(elapsed)
+        print(f"Onset at {elapsed:7.3f} s | peak={peak:.3f} rms={rms:.3f}")
+
+    energy_history.append(rms)
 
 
 def process_pending_onsets(elapsed, matcher):
@@ -124,37 +162,49 @@ def callback(indata, frames, callback_time, status):
         print(status)
 
     audio = indata[:, CHANNEL_INDEX].copy()
-    with audio_buffer_lock:
-        audio_buffer.extend(audio)
 
     now = time.perf_counter()
     if start_time is None or now < start_time:
         return
 
-    rms = np.sqrt(np.mean(audio ** 2))
-    peak = np.max(np.abs(audio))
-
-    recent_energy = np.mean(energy_history) if energy_history else rms
     elapsed = now - start_time
-    time_since_last = (elapsed - last_onset_time) * 1000
-
-    strong_enough = rms > MIN_RMS
-    rising_fast = rms > recent_energy * RISE_RATIO
-    outside_refractory = time_since_last > REFRACTORY_MS
-
-    if strong_enough and rising_fast and outside_refractory:
-        last_onset_time = elapsed
-        with onset_lock:
-            pending_onsets.append(elapsed)
-        print(f"Onset at {elapsed:7.3f} s | peak={peak:.3f} rms={rms:.3f}")
-
-    energy_history.append(rms)
+    process_audio_chunk(audio, elapsed)
 
 
-input("Press Enter when ready...")
+def run_offline_audio(matcher):
+    audio_data = load_offline_audio()
+    num_samples = len(audio_data)
+    sample_index = 0
 
-TIMING_OFFSET_MS = load_calibration(CALIBRATION_CONFIG_PATH, TIMING_OFFSET_MS)
-print(f"Loaded TIMING_OFFSET_MS = {TIMING_OFFSET_MS:+.1f} ms")
+    while sample_index < num_samples:
+        chunk = audio_data[sample_index : sample_index + BLOCK_SIZE]
+        elapsed = sample_index / SAMPLE_RATE
+        process_audio_chunk(chunk, elapsed)
+        process_pending_onsets(elapsed, matcher)
+
+        if CALIBRATION_MODE and matcher.current_target_index >= len(targets):
+            break
+
+        sample_index += BLOCK_SIZE
+
+    final_elapsed = num_samples / SAMPLE_RATE + PITCH_DELAY_SEC + PITCH_WINDOW_SEC
+    process_pending_onsets(final_elapsed, matcher)
+
+
+if not OFFLINE_MODE:
+    input("Press Enter when ready...")
+
+if OFFLINE_MODE:
+    if APPLY_CALIBRATION_IN_OFFLINE_MODE:
+        TIMING_OFFSET_MS = load_calibration(CALIBRATION_CONFIG_PATH, TIMING_OFFSET_MS)
+        print(f"Loaded TIMING_OFFSET_MS = {TIMING_OFFSET_MS:+.1f} ms")
+    else:
+        TIMING_OFFSET_MS = 0
+        print("Offline mode: calibration correction disabled. TIMING_OFFSET_MS = 0 ms")
+else:
+    TIMING_OFFSET_MS = load_calibration(CALIBRATION_CONFIG_PATH, TIMING_OFFSET_MS)
+    print(f"Loaded TIMING_OFFSET_MS = {TIMING_OFFSET_MS:+.1f} ms")
+
 if CALIBRATION_MODE:
     print("Calibration mode enabled: using 8-note 60 BPM target pattern.")
     targets = CALIBRATION_TARGETS
@@ -171,7 +221,7 @@ if METRONOME_ENABLED and METRONOME_MODE != "silent":
 
 start_time = play_start_time
 metronome = None
-if METRONOME_ENABLED:
+if METRONOME_ENABLED and not OFFLINE_MODE:
     metronome = Metronome(
         METRONOME_BPM,
         mode=METRONOME_MODE,
@@ -181,36 +231,43 @@ if METRONOME_ENABLED:
     )
     metronome.start(play_start_time)
 
-print("Listening. Press Ctrl+C to stop.")
+if OFFLINE_MODE:
+    print("Offline mode: processing audio file immediately.")
+else:
+    print("Listening. Press Ctrl+C to stop.")
 interrupted = False
 try:
-    with sd.InputStream(
-        device=DEVICE_ID,
-        channels=CHANNELS,
-        samplerate=SAMPLE_RATE,
-        blocksize=BLOCK_SIZE,
-        dtype="float32",
-        callback=callback,
-    ):
+    if OFFLINE_MODE:
+        run_offline_audio(matcher)
+    else:
+        with sd.InputStream(
+            device=DEVICE_ID,
+            channels=CHANNELS,
+            samplerate=SAMPLE_RATE,
+            blocksize=BLOCK_SIZE,
+            dtype="float32",
+            callback=callback,
+        ):
 
-        while True:
-            now = time.perf_counter()
-            if start_time is not None:
-                elapsed = now - start_time
+            while True:
+                now = time.perf_counter()
+                if start_time is not None:
+                    elapsed = now - start_time
 
-                process_pending_onsets(elapsed, matcher)
+                    process_pending_onsets(elapsed, matcher)
 
-                if CALIBRATION_MODE and matcher.current_target_index >= len(targets):
-                    break
+                    if CALIBRATION_MODE and matcher.current_target_index >= len(targets):
+                        break
 
-            time.sleep(0.02)
+                time.sleep(0.02)
 
 except KeyboardInterrupt:
     interrupted = True
 else:
     interrupted = False
 finally:
-    cleanup_audio(metronome)
+    if not OFFLINE_MODE:
+        cleanup_audio(metronome)
     matcher.finalize_remaining_targets()
 
     if CALIBRATION_MODE and not interrupted:

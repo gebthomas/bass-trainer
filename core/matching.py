@@ -40,6 +40,7 @@ class TargetMatcher:
 
     def _finalize_target(self, target):
         if not self.target_candidates:
+            print(f"    Missed target {target['note']} @ {target['time']:.3f}s")
             self.results_logger.append_miss(target)
             return
 
@@ -70,7 +71,6 @@ class TargetMatcher:
             target = self.targets[self.current_target_index]
             window = get_match_window(self.current_target_index, self.targets)
             if onset_time > target["time"] + window:
-                print(f"    Missed target {target['note']} @ {target['time']:.3f}s")
                 self._finalize_target(target)
                 self.current_target_index += 1
                 continue
