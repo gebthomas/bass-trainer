@@ -75,6 +75,26 @@ CASES = [
         expected_pitch_accuracy=100.0,
         expected_mean_raw_timing_error_range=(-20.0, 20.0),
     ),
+    RegressionCase(
+				name="pentatonic_perfect",
+				audio=ROOT / "tests" / "audio" / "pentatonic_perfect.wav",
+				targets=ROOT / "tests" / "targets" / "pentatonic_60.json",
+				expected_hits=9,
+				expected_missed=0,
+				expected_extra=0,
+				expected_pitch_accuracy=100.0,
+				expected_mean_raw_timing_error_range=(-20.0, 20.0),
+		),
+		RegressionCase(
+				name="pentatonic_late_100ms",
+				audio=ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav",
+				targets=ROOT / "tests" / "targets" / "pentatonic_60.json",
+				expected_hits=9,
+				expected_missed=0,
+				expected_extra=0,
+				expected_pitch_accuracy=100.0,
+				expected_mean_raw_timing_error_range=(70.0, 130.0),
+		),
 ]
 
 
