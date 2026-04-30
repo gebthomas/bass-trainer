@@ -58,10 +58,12 @@ OFFLINE_MODE = True
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_missed_first.wav"
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_extra_between.wav"
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_perfect.wav"
-OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav"
+#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav"
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
-OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
-APPLY_CALIBRATION_IN_OFFLINE_MODE = False
+#OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
+OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretted_finger" / "slow_quarter_clean.wav"
+OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
+APPLY_CALIBRATION_IN_OFFLINE_MODE = True
 if OFFLINE_MODE:
     targets = load_targets(OFFLINE_TARGET_FILE)
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
