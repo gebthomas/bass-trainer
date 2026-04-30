@@ -1,0 +1,117 @@
+import csv
+from datetime import datetime
+from pathlib import Path
+import numpy as np
+
+
+class ResultsLogger:
+    FIELDNAMES = [
+        "event_type",
+        "target_note",
+        "target_time",
+        "played_note",
+        "played_time",
+        "raw_timing_error_ms",
+        "corrected_timing_error_ms",
+        "pitch_ok",
+        "timing_label",
+    ]
+
+    def __init__(self, results_dir):
+        self.results = []
+        self.results_dir = Path(results_dir)
+
+    def append_hit(self, target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note):
+        self.results.append({
+            "event_type": "hit",
+            "target_note": target["note"],
+            "target_time": target["time"],
+            "played_note": note,
+            "played_time": onset_time,
+            "raw_timing_error_ms": raw_error,
+            "corrected_timing_error_ms": corrected_error,
+            "pitch_ok": pitch_ok,
+            "timing_label": timing_label,
+        })
+
+    def append_miss(self, target):
+        self.results.append({
+            "event_type": "missed",
+            "target_note": target["note"],
+            "target_time": target["time"],
+            "played_note": "",
+            "played_time": "",
+            "raw_timing_error_ms": "",
+            "corrected_timing_error_ms": "",
+            "pitch_ok": False,
+            "timing_label": "missed",
+        })
+
+    def append_extra(self, note, onset_time):
+        self.results.append({
+            "event_type": "extra",
+            "target_note": "",
+            "target_time": "",
+            "played_note": note,
+            "played_time": onset_time,
+            "raw_timing_error_ms": "",
+            "corrected_timing_error_ms": "",
+            "pitch_ok": False,
+            "timing_label": "extra",
+        })
+
+    def print_summary(self):
+        if not self.results:
+            print("No notes evaluated.")
+            return
+
+        hit_rows = [r for r in self.results if r.get("event_type") == "hit"]
+        missed_rows = [r for r in self.results if r.get("event_type") == "missed"]
+        extra_rows = [r for r in self.results if r.get("event_type") == "extra"]
+
+        raw_errors = [r["raw_timing_error_ms"] for r in hit_rows]
+        corrected_errors = [r["corrected_timing_error_ms"] for r in hit_rows]
+        pitch_accuracy = (sum(r["pitch_ok"] for r in hit_rows) / len(hit_rows) * 100) if hit_rows else 0.0
+
+        print("\nSession summary")
+        print(f"Hits/evaluated notes: {len(hit_rows)}")
+        print(f"Missed notes: {len(missed_rows)}")
+        print(f"Extra notes: {len(extra_rows)}")
+
+        if hit_rows:
+            print(f"Average raw timing error: {np.mean(raw_errors):+.1f} ms")
+            print(f"Average corrected timing error: {np.mean(corrected_errors):+.1f} ms")
+            print(f"Average absolute corrected timing error: {np.mean(np.abs(corrected_errors)):.1f} ms")
+            print(f"Pitch accuracy: {pitch_accuracy:.1f}%")
+        else:
+            print("Average raw timing error: N/A")
+            print("Average corrected timing error: N/A")
+            print("Average absolute corrected timing error: N/A")
+            print("Pitch accuracy: N/A")
+
+    def save_csv(self):
+        if not self.results:
+            return None
+
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        path = self.results_dir / f"session_{timestamp}.csv"
+
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.FIELDNAMES)
+            writer.writeheader()
+            for row in self.results:
+                writer.writerow({
+                    "event_type": row.get("event_type"),
+                    "target_note": row.get("target_note"),
+                    "target_time": row.get("target_time"),
+                    "played_note": row.get("played_note"),
+                    "played_time": row.get("played_time"),
+                    "raw_timing_error_ms": row.get("raw_timing_error_ms"),
+                    "corrected_timing_error_ms": row.get("corrected_timing_error_ms"),
+                    "pitch_ok": row.get("pitch_ok"),
+                    "timing_label": row.get("timing_label"),
+                })
+
+        print(f"Saved session results to {path}")
+        return path

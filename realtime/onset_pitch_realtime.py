@@ -1,12 +1,10 @@
 import sys
 from pathlib import Path
-import json
-import csv
-from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
-import sounddevice as sd
+
+import json
 import numpy as np
 import librosa
 import math
@@ -14,6 +12,12 @@ import time
 import threading
 from collections import deque
 from core.targets import load_targets, timing_error_ms, compare_note
+from core.calibration import load_calibration, save_calibration, run_calibration_summary
+from core.matching import TargetMatcher
+from core.results import ResultsLogger
+from core.pitch import estimate_pitch
+from realtime.metronome import Metronome
+import sounddevice as sd
 
 targets = load_targets("targets/targets.json")
 
@@ -33,8 +37,6 @@ PITCH_WINDOW_SEC = 0.12
 MATCH_WINDOW_FRACTION = 0.40
 MIN_MATCH_WINDOW_SEC = 0.12
 MAX_MATCH_WINDOW_SEC = 0.40
-
-current_target_index = 0
 
 METRONOME_ENABLED = True
 METRONOME_MODE = "count_in_and_click"  # options: count_in_and_click, count_in_only, silent
@@ -58,62 +60,9 @@ last_onset_time = -999
 energy_history = deque(maxlen=HISTORY_BLOCKS)
 audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
-results = []
 
 onset_lock = threading.Lock()
 audio_buffer_lock = threading.Lock()
-
-def load_calibration():
-    if CALIBRATION_CONFIG_PATH.exists():
-        try:
-            with CALIBRATION_CONFIG_PATH.open("r", encoding="utf-8") as handle:
-                config = json.load(handle)
-            return config.get("timing_offset_ms", TIMING_OFFSET_MS)
-        except Exception as ex:
-            print(f"Warning: failed to load calibration: {ex}")
-    return TIMING_OFFSET_MS
-
-
-def save_calibration(offset_ms):
-    CALIBRATION_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with CALIBRATION_CONFIG_PATH.open("w", encoding="utf-8") as handle:
-        json.dump({"timing_offset_ms": offset_ms}, handle, indent=2)
-
-
-def run_calibration_summary(calibration_errors):
-    if not calibration_errors:
-        print("No calibration notes were recorded.")
-        return
-
-    average_raw_error_ms = float(np.mean(calibration_errors))
-    timing_offset_ms = -average_raw_error_ms
-    save_calibration(timing_offset_ms)
-    print("\nCalibration complete")
-    print(f"Average raw timing error: {average_raw_error_ms:+.1f} ms")
-    print(f"Saved TIMING_OFFSET_MS = {timing_offset_ms:+.1f} ms to {CALIBRATION_CONFIG_PATH}")
-
-
-def get_match_window(target_index, targets):
-    prev_gap = None
-    next_gap = None
-
-    if target_index > 0:
-        prev_gap = targets[target_index]["time"] - targets[target_index - 1]["time"]
-    if target_index + 1 < len(targets):
-        next_gap = targets[target_index + 1]["time"] - targets[target_index]["time"]
-
-    if prev_gap is not None and next_gap is not None:
-        local_gap = min(prev_gap, next_gap)
-    elif prev_gap is not None:
-        local_gap = prev_gap
-    elif next_gap is not None:
-        local_gap = next_gap
-    else:
-        local_gap = MAX_MATCH_WINDOW_SEC
-
-    window = local_gap * MATCH_WINDOW_FRACTION
-    return max(MIN_MATCH_WINDOW_SEC, min(MAX_MATCH_WINDOW_SEC, window))
-
 
 def cleanup_audio(metronome_instance=None):
     if METRONOME_ENABLED and metronome_instance is not None:
@@ -129,230 +78,43 @@ def cleanup_audio(metronome_instance=None):
     print("Audio cleanup complete.")
 
 
-def append_extra_result(note, onset_time):
-    results.append({
-        "event_type": "extra",
-        "target_note": "",
-        "target_time": "",
-        "played_note": note,
-        "played_time": onset_time,
-        "raw_timing_error_ms": "",
-        "corrected_timing_error_ms": "",
-        "pitch_ok": False,
-        "timing_label": "extra",
-    })
+def process_pending_onsets(elapsed, matcher):
+    processed_onsets = []
+    with onset_lock:
+        pending_snapshot = list(pending_onsets)
 
+    for onset_time in pending_snapshot:
+        if elapsed >= onset_time + PITCH_DELAY_SEC + PITCH_WINDOW_SEC:
+            with audio_buffer_lock:
+                buffer_snapshot = list(audio_buffer)
+            buffer_array = np.array(buffer_snapshot, dtype=np.float32)
 
-def append_missed_target_result(target):
-    results.append({
-        "event_type": "missed",
-        "target_note": target["note"],
-        "target_time": target["time"],
-        "played_note": "",
-        "played_time": "",
-        "raw_timing_error_ms": "",
-        "corrected_timing_error_ms": "",
-        "pitch_ok": False,
-        "timing_label": "missed",
-    })
+            end_samples_back = int((elapsed - onset_time - PITCH_DELAY_SEC - PITCH_WINDOW_SEC) * SAMPLE_RATE)
+            window_samples = int(PITCH_WINDOW_SEC * SAMPLE_RATE)
 
+            end_index = len(buffer_array) - max(0, end_samples_back)
+            start_index = end_index - window_samples
 
-def append_hit_result(target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note):
-    results.append({
-        "event_type": "hit",
-        "target_note": target["note"],
-        "target_time": target["time"],
-        "played_note": note,
-        "played_time": onset_time,
-        "raw_timing_error_ms": raw_error,
-        "corrected_timing_error_ms": corrected_error,
-        "pitch_ok": pitch_ok,
-        "timing_label": timing_label,
-    })
-
-
-def finalize_target(target, candidates):
-    if not candidates:
-        append_missed_target_result(target)
-        return
-
-    correct_candidates = [c for c in candidates if c["pitch_ok"]]
-    if correct_candidates:
-        chosen = min(correct_candidates, key=lambda c: abs(c["corrected_error"]))
-    else:
-        chosen = min(candidates, key=lambda c: abs(c["raw_error"]))
-
-    for candidate in candidates:
-        if candidate is chosen:
-            append_hit_result(
-                target,
-                candidate["onset_time"],
-                candidate["raw_error"],
-                candidate["corrected_error"],
-                candidate["pitch_ok"],
-                candidate["timing_label"],
-                candidate["note"],
-            )
-        else:
-            append_extra_result(candidate["note"], candidate["onset_time"])
-
-
-def save_results_csv(results):
-    if not results:
-        return None
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    path = RESULTS_DIR / f"session_{timestamp}.csv"
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[
-            "event_type",
-            "target_note",
-            "target_time",
-            "played_note",
-            "played_time",
-            "raw_timing_error_ms",
-            "corrected_timing_error_ms",
-            "pitch_ok",
-            "timing_label",
-        ])
-        writer.writeheader()
-        for row in results:
-            writer.writerow({
-                "event_type": row.get("event_type"),
-                "target_note": row.get("target_note"),
-                "target_time": row.get("target_time"),
-                "played_note": row.get("played_note"),
-                "played_time": row.get("played_time"),
-                "raw_timing_error_ms": row.get("raw_timing_error_ms"),
-                "corrected_timing_error_ms": row.get("corrected_timing_error_ms"),
-                "pitch_ok": row.get("pitch_ok"),
-                "timing_label": row.get("timing_label"),
-            })
-    print(f"Saved session results to {path}")
-    return path
-
-
-def play_click(frequency=1000, duration=0.04, volume=0.4):
-    t = np.linspace(0, duration, int(SAMPLE_RATE * duration), endpoint=False)
-    click = volume * np.sin(2 * np.pi * frequency * t)
-    sd.play(click, SAMPLE_RATE, blocking=False)
-
-class Metronome:
-    def __init__(self, bpm, mode="count_in_and_click", count_in_beats=4,
-                 volume=0.35, beats_per_measure=4):
-        self.bpm = bpm
-        self.mode = mode
-        self.count_in_beats = count_in_beats
-        self.volume = volume
-        self.beats_per_measure = beats_per_measure
-        self.stop_event = threading.Event()
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.play_start_time = None
-
-    def start(self, play_start_time):
-        self.play_start_time = play_start_time
-        self.thread.start()
-
-    def stop(self):
-        self.stop_event.set()
-        self.thread.join()
-
-    def _run(self):
-        if self.mode == "silent":
-            return
-
-        beat_duration = 60.0 / self.bpm
-        count_in_duration = self.count_in_beats * beat_duration
-        next_click_time = self.play_start_time - count_in_duration
-        beat = 1
-        click_phase = "count_in" if self.count_in_beats > 0 else "play"
-
-        if self.count_in_beats == 0:
-            print(f"\nPlay start at {self.play_start_time:.3f}s")
-            print("PLAY\n")
-
-        while not self.stop_event.is_set():
-            now = time.perf_counter()
-
-            if now >= next_click_time:
-                if click_phase == "count_in":
-                    if beat == 1:
-                        print(f"\nCount-in at {self.bpm} BPM")
-                    freq = COUNT_IN_FIRST_BEAT_FREQ if beat == 1 else COUNT_IN_REGULAR_BEAT_FREQ
-                    play_click(frequency=freq, duration=0.035, volume=self.volume)
-
-                    beat += 1
-                    if beat > self.count_in_beats:
-                        if self.mode == "count_in_and_click":
-                            click_phase = "play"
-                            beat = 1
-                            print("PLAY\n")
-                        else:
-                            return
+            if start_index >= 0:
+                segment = buffer_array[start_index:end_index]
+                freq, note = estimate_pitch(segment)
+                if freq is not None:
+                    handled = matcher.process_onset_against_targets(
+                        onset_time,
+                        note,
+                        timing_error_ms,
+                        compare_note,
+                    )
+                    if handled:
+                        processed_onsets.append(onset_time)
                 else:
-                    freq = PLAY_FIRST_BEAT_FREQ if beat == 1 else PLAY_REGULAR_BEAT_FREQ
-                    play_click(frequency=freq, duration=0.035, volume=self.volume)
-                    beat += 1
-                    if beat > self.beats_per_measure:
-                        beat = 1
+                    print("    Pitch: no stable pitch detected")
 
-                next_click_time += beat_duration
-            else:
-                time.sleep(0.001)
-
-def hz_to_note(freq):
-    midi = round(69 + 12 * math.log2(freq / 440.0))
-    names = ["C", "C#", "D", "D#", "E", "F",
-             "F#", "G", "G#", "A", "A#", "B"]
-    return f"{names[midi % 12]}{midi // 12 - 1}", midi
-
-def print_summary(results):
-    if not results:
-        print("No notes evaluated.")
-        return
-
-    hit_rows = [r for r in results if r.get("event_type") == "hit"]
-    missed_rows = [r for r in results if r.get("event_type") == "missed"]
-    extra_rows = [r for r in results if r.get("event_type") == "extra"]
-
-    raw_errors = [r["raw_timing_error_ms"] for r in hit_rows]
-    corrected_errors = [r["corrected_timing_error_ms"] for r in hit_rows]
-    pitch_accuracy = (sum(r["pitch_ok"] for r in hit_rows) / len(hit_rows) * 100) if hit_rows else 0.0
-
-    print("\nSession summary")
-    print(f"Hits/evaluated notes: {len(hit_rows)}")
-    print(f"Missed notes: {len(missed_rows)}")
-    print(f"Extra notes: {len(extra_rows)}")
-
-    if hit_rows:
-        print(f"Average raw timing error: {np.mean(raw_errors):+.1f} ms")
-        print(f"Average corrected timing error: {np.mean(corrected_errors):+.1f} ms")
-        print(f"Average absolute corrected timing error: {np.mean(np.abs(corrected_errors)):.1f} ms")
-        print(f"Pitch accuracy: {pitch_accuracy:.1f}%")
-    else:
-        print("Average raw timing error: N/A")
-        print("Average corrected timing error: N/A")
-        print("Average absolute corrected timing error: N/A")
-        print("Pitch accuracy: N/A")
-
-def estimate_pitch(segment):
-    f0, voiced_flag, voiced_prob = librosa.pyin(
-        segment,
-        fmin=librosa.note_to_hz("E1"),
-        fmax=librosa.note_to_hz("G4"),
-        sr=SAMPLE_RATE,
-        frame_length=4096,
-        hop_length=512,
-    )
-
-    valid = f0[~np.isnan(f0)]
-
-    if len(valid) == 0:
-        return None, None
-
-    freq = float(np.median(valid))
-    note, midi = hz_to_note(freq)
-    return freq, note
+    if processed_onsets:
+        with onset_lock:
+            for onset_time in processed_onsets:
+                if onset_time in pending_onsets:
+                    pending_onsets.remove(onset_time)
 
 
 def callback(indata, frames, callback_time, status):
@@ -391,15 +153,15 @@ def callback(indata, frames, callback_time, status):
 
 input("Press Enter when ready...")
 
-TIMING_OFFSET_MS = load_calibration()
+TIMING_OFFSET_MS = load_calibration(CALIBRATION_CONFIG_PATH, TIMING_OFFSET_MS)
 print(f"Loaded TIMING_OFFSET_MS = {TIMING_OFFSET_MS:+.1f} ms")
 if CALIBRATION_MODE:
     print("Calibration mode enabled: using 8-note 60 BPM target pattern.")
     targets = CALIBRATION_TARGETS
 
-current_target_index = 0
+results_logger = ResultsLogger(RESULTS_DIR)
+matcher = TargetMatcher(targets, TIMING_OFFSET_MS, results_logger)
 pending_onsets.clear()
-target_candidates = []
 
 play_start_time = time.perf_counter()
 if METRONOME_ENABLED and METRONOME_MODE != "silent":
@@ -436,80 +198,9 @@ try:
             if start_time is not None:
                 elapsed = now - start_time
 
-                with onset_lock:
-                    pending_snapshot = list(pending_onsets)
+                process_pending_onsets(elapsed, matcher)
 
-                processed_onsets = []
-                for onset_time in pending_snapshot:
-                    if elapsed >= onset_time + PITCH_DELAY_SEC + PITCH_WINDOW_SEC:
-                        with audio_buffer_lock:
-                            buffer_snapshot = list(audio_buffer)
-                        buffer_array = np.array(buffer_snapshot, dtype=np.float32)
-
-                        end_samples_back = int((elapsed - onset_time - PITCH_DELAY_SEC - PITCH_WINDOW_SEC) * SAMPLE_RATE)
-                        window_samples = int(PITCH_WINDOW_SEC * SAMPLE_RATE)
-
-                        end_index = len(buffer_array) - max(0, end_samples_back)
-                        start_index = end_index - window_samples
-
-                        if start_index >= 0:
-                            segment = buffer_array[start_index:end_index]
-                            freq, note = estimate_pitch(segment)
-                            if freq is not None:
-                                while current_target_index < len(targets):
-                                    target = targets[current_target_index]
-                                    window = get_match_window(current_target_index, targets)
-                                    if onset_time > target["time"] + window:
-                                        print(f"    Missed target {target['note']} @ {target['time']:.3f}s")
-                                        finalize_target(target, target_candidates)
-                                        target_candidates = []
-                                        current_target_index += 1
-                                        continue
-                                    break
-
-                                if current_target_index >= len(targets):
-                                    print(f"    Extra note at {onset_time:.3f}s: no remaining target")
-                                    append_extra_result(note, onset_time)
-                                    processed_onsets.append(onset_time)
-                                else:
-                                    target = targets[current_target_index]
-                                    window = get_match_window(current_target_index, targets)
-
-                                    if onset_time < target["time"] - window:
-                                        print(f"    Extra note at {onset_time:.3f}s: before target window")
-                                        append_extra_result(note, onset_time)
-                                        processed_onsets.append(onset_time)
-                                    else:
-                                        raw_error = timing_error_ms(onset_time, target["time"])
-                                        corrected_error = raw_error + TIMING_OFFSET_MS
-                                        pitch_ok = compare_note(note, target["note"])
-
-                                        if abs(corrected_error) < 30:
-                                            timing_label = "tight"
-                                        elif abs(corrected_error) < 80:
-                                            timing_label = "ok"
-                                        else:
-                                            timing_label = "off"
-
-                                        target_candidates.append({
-                                            "onset_time": onset_time,
-                                            "note": note,
-                                            "raw_error": raw_error,
-                                            "corrected_error": corrected_error,
-                                            "pitch_ok": pitch_ok,
-                                            "timing_label": timing_label,
-                                        })
-                                        processed_onsets.append(onset_time)
-                            else:
-                                print("    Pitch: no stable pitch detected")
-
-                if processed_onsets:
-                    with onset_lock:
-                        for onset_time in processed_onsets:
-                            if onset_time in pending_onsets:
-                                pending_onsets.remove(onset_time)
-
-                if CALIBRATION_MODE and current_target_index >= len(targets):
+                if CALIBRATION_MODE and matcher.current_target_index >= len(targets):
                     break
 
             time.sleep(0.02)
@@ -520,14 +211,13 @@ else:
     interrupted = False
 finally:
     cleanup_audio(metronome)
-    while current_target_index < len(targets):
-        finalize_target(targets[current_target_index], target_candidates)
-        target_candidates = []
-        current_target_index += 1
+    matcher.finalize_remaining_targets()
 
     if CALIBRATION_MODE and not interrupted:
-        calibration_errors = [r["raw_timing_error_ms"] for r in results if "raw_timing_error_ms" in r]
-        run_calibration_summary(calibration_errors)
-    print_summary(results)
-    if not CALIBRATION_MODE and results:
-        save_results_csv(results)
+        calibration_errors = [
+            r["raw_timing_error_ms"] for r in results_logger.results if "raw_timing_error_ms" in r
+        ]
+        run_calibration_summary(calibration_errors, save_calibration, CALIBRATION_CONFIG_PATH)
+    results_logger.print_summary()
+    if not CALIBRATION_MODE and results_logger.results:
+        results_logger.save_csv()
