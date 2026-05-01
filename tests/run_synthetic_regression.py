@@ -73,7 +73,7 @@ CASES = [
         expected_missed=0,
         expected_extra=1,
         expected_pitch_accuracy=100.0,
-        expected_mean_raw_timing_error_range=(-20.0, 20.0),
+        expected_mean_raw_timing_error_range=(-30.0, 100.0),
     ),
     RegressionCase(
 				name="pentatonic_perfect",

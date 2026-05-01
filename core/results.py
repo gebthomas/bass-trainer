@@ -15,13 +15,18 @@ class ResultsLogger:
         "corrected_timing_error_ms",
         "pitch_ok",
         "timing_label",
+        "detected_freq_hz",
+        "target_freq_hz",
+        "cents_error",
+        "pitch_stability_cents",
     ]
 
     def __init__(self, results_dir):
         self.results = []
         self.results_dir = Path(results_dir)
 
-    def append_hit(self, target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note):
+    def append_hit(self, target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note,
+                   detected_freq_hz="", target_freq_hz="", cents_error="", pitch_stability_cents=""):
         self.results.append({
             "event_type": "hit",
             "target_note": target["note"],
@@ -32,6 +37,10 @@ class ResultsLogger:
             "corrected_timing_error_ms": corrected_error,
             "pitch_ok": pitch_ok,
             "timing_label": timing_label,
+            "detected_freq_hz": detected_freq_hz,
+            "target_freq_hz": target_freq_hz,
+            "cents_error": cents_error,
+            "pitch_stability_cents": pitch_stability_cents,
         })
 
     def append_miss(self, target):
@@ -45,9 +54,13 @@ class ResultsLogger:
             "corrected_timing_error_ms": "",
             "pitch_ok": False,
             "timing_label": "missed",
+            "detected_freq_hz": "",
+            "target_freq_hz": "",
+            "cents_error": "",
+            "pitch_stability_cents": "",
         })
 
-    def append_extra(self, note, onset_time):
+    def append_extra(self, note, onset_time, detected_freq_hz="", pitch_stability_cents=""):
         self.results.append({
             "event_type": "extra",
             "target_note": "",
@@ -58,6 +71,10 @@ class ResultsLogger:
             "corrected_timing_error_ms": "",
             "pitch_ok": False,
             "timing_label": "extra",
+            "detected_freq_hz": detected_freq_hz,
+            "target_freq_hz": "",
+            "cents_error": "",
+            "pitch_stability_cents": pitch_stability_cents,
         })
 
     def print_summary(self):
@@ -101,17 +118,7 @@ class ResultsLogger:
             writer = csv.DictWriter(handle, fieldnames=self.FIELDNAMES)
             writer.writeheader()
             for row in self.results:
-                writer.writerow({
-                    "event_type": row.get("event_type"),
-                    "target_note": row.get("target_note"),
-                    "target_time": row.get("target_time"),
-                    "played_note": row.get("played_note"),
-                    "played_time": row.get("played_time"),
-                    "raw_timing_error_ms": row.get("raw_timing_error_ms"),
-                    "corrected_timing_error_ms": row.get("corrected_timing_error_ms"),
-                    "pitch_ok": row.get("pitch_ok"),
-                    "timing_label": row.get("timing_label"),
-                })
+                writer.writerow({f: row.get(f, "") for f in self.FIELDNAMES})
 
         print(f"Saved session results to {path}")
         return path

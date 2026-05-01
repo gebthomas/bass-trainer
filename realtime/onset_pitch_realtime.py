@@ -32,14 +32,18 @@ RISE_RATIO = 1.6
 REFRACTORY_MS = 180
 HISTORY_BLOCKS = 3
 
-ONSET_DETECTOR_MODE = "smoothed_lockout"
-SMOOTHING_BLOCKS = 8
+ONSET_DETECTOR_MODE = "decay_break"
+SMOOTHING_BLOCKS = 4
 SLOPE_THRESHOLD = 0.01
 RELEASE_THRESHOLD = MIN_RMS * 1.2
-FORCE_REARM_FRACTION_OF_BEAT = 0.30
+FORCE_REARM_FRACTION_OF_BEAT = 0.45
 MIN_SPACING_FRACTION_OF_BEAT = 0.5
 SMOOTHED_LOCKOUT_SPACING_FRACTION_OF_BEAT = 0.25
 USE_TEMPO_SPACING = True
+
+DECAY_TAU_SEC = 0.8
+ENERGY_BREAK_RATIO = 2.2
+ATTACK_TRACK_SEC = 0.04
 
 PITCH_DELAY_SEC = 0.08
 PITCH_WINDOW_SEC = 0.12
@@ -84,6 +88,11 @@ energy_history = deque(maxlen=HISTORY_BLOCKS)
 rms_history = deque(maxlen=SMOOTHING_BLOCKS)
 previous_smoothed_rms = None
 active_note = False
+last_peak_energy = 0.0
+last_peak_time = -999.0
+attack_tracking = False
+attack_start_time = 0.0
+attack_peak_energy = 0.0
 
 audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
@@ -113,7 +122,7 @@ def load_offline_audio():
 
 
 def process_audio_chunk(audio, elapsed):
-    global last_onset_time, active_note, previous_smoothed_rms
+    global last_onset_time, active_note, previous_smoothed_rms, last_peak_energy, last_peak_time, attack_tracking, attack_start_time, attack_peak_energy
 
     with audio_buffer_lock:
         audio_buffer.extend(audio)
@@ -163,6 +172,37 @@ def process_audio_chunk(audio, elapsed):
 
         previous_smoothed_rms = smoothed_rms
 
+    elif ONSET_DETECTOR_MODE == "decay_break":
+        rms_history.append(rms)
+        smoothed_rms = np.mean(rms_history)
+        slope = 0.0 if previous_smoothed_rms is None else smoothed_rms - previous_smoothed_rms
+
+        if attack_tracking:
+            attack_peak_energy = max(attack_peak_energy, smoothed_rms)
+            if elapsed - attack_start_time >= ATTACK_TRACK_SEC:
+                last_peak_energy = attack_peak_energy
+                last_peak_time = attack_start_time
+                attack_tracking = False
+        else:
+            strong_enough = smoothed_rms >= MIN_RMS
+            rising = slope > 0
+
+            if last_peak_energy == 0.0:
+                if strong_enough and rising and spaced:
+                    onset_detected = True
+            else:
+                expected_energy = last_peak_energy * math.exp(-(elapsed - last_peak_time) / DECAY_TAU_SEC)
+                breaks_decay = smoothed_rms > expected_energy * ENERGY_BREAK_RATIO
+                if strong_enough and rising and breaks_decay and spaced:
+                    onset_detected = True
+
+            if onset_detected:
+                attack_tracking = True
+                attack_start_time = elapsed
+                attack_peak_energy = smoothed_rms
+
+        previous_smoothed_rms = smoothed_rms
+
     else:
         raise ValueError(f"Unsupported ONSET_DETECTOR_MODE: {ONSET_DETECTOR_MODE}")
 
@@ -194,18 +234,21 @@ def process_pending_onsets(elapsed, matcher):
 
             if start_index >= 0:
                 segment = buffer_array[start_index:end_index]
-                freq, note = estimate_pitch(segment)
+                freq, note, stability_cents = estimate_pitch(segment)
                 if freq is not None:
                     handled = matcher.process_onset_against_targets(
                         onset_time,
                         note,
                         timing_error_ms,
                         compare_note,
+                        detected_freq_hz=freq,
+                        pitch_stability_cents=stability_cents,
                     )
                     if handled:
                         processed_onsets.append(onset_time)
                 else:
                     print("    Pitch: no stable pitch detected")
+                    processed_onsets.append(onset_time)
 
     if processed_onsets:
         with onset_lock:

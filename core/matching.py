@@ -1,3 +1,6 @@
+from core.pitch import note_to_hz, cents_between
+
+
 def get_match_window(target_index, targets):
     prev_gap = None
     next_gap = None
@@ -28,7 +31,8 @@ class TargetMatcher:
         self.current_target_index = 0
         self.target_candidates = []
 
-    def add_onset_candidate(self, onset_time, note, raw_error, corrected_error, pitch_ok, timing_label):
+    def add_onset_candidate(self, onset_time, note, raw_error, corrected_error, pitch_ok, timing_label,
+                            detected_freq_hz=None, pitch_stability_cents=None):
         self.target_candidates.append({
             "onset_time": onset_time,
             "note": note,
@@ -36,6 +40,8 @@ class TargetMatcher:
             "corrected_error": corrected_error,
             "pitch_ok": pitch_ok,
             "timing_label": timing_label,
+            "detected_freq_hz": detected_freq_hz,
+            "pitch_stability_cents": pitch_stability_cents,
         })
 
     def _finalize_target(self, target):
@@ -50,8 +56,12 @@ class TargetMatcher:
         else:
             chosen = min(self.target_candidates, key=lambda c: abs(c["raw_error"]))
 
+        target_hz = note_to_hz(target["note"])
         for candidate in self.target_candidates:
+            det_hz = candidate["detected_freq_hz"]
+            stability = candidate["pitch_stability_cents"]
             if candidate is chosen:
+                error_cents = cents_between(det_hz, target_hz) if det_hz else ""
                 self.results_logger.append_hit(
                     target,
                     candidate["onset_time"],
@@ -60,13 +70,22 @@ class TargetMatcher:
                     candidate["pitch_ok"],
                     candidate["timing_label"],
                     candidate["note"],
+                    detected_freq_hz=det_hz if det_hz else "",
+                    target_freq_hz=target_hz,
+                    cents_error=error_cents,
+                    pitch_stability_cents=stability if stability is not None else "",
                 )
             else:
-                self.results_logger.append_extra(candidate["note"], candidate["onset_time"])
+                self.results_logger.append_extra(
+                    candidate["note"], candidate["onset_time"],
+                    detected_freq_hz=det_hz if det_hz else "",
+                    pitch_stability_cents=stability if stability is not None else "",
+                )
 
         self.target_candidates = []
 
-    def process_onset_against_targets(self, onset_time, note, timing_error_fn, compare_note_fn):
+    def process_onset_against_targets(self, onset_time, note, timing_error_fn, compare_note_fn,
+                                       detected_freq_hz=None, pitch_stability_cents=None):
         while self.current_target_index < len(self.targets):
             target = self.targets[self.current_target_index]
             window = get_match_window(self.current_target_index, self.targets)
@@ -78,7 +97,11 @@ class TargetMatcher:
 
         if self.current_target_index >= len(self.targets):
             print(f"    Extra note at {onset_time:.3f}s: no remaining target")
-            self.results_logger.append_extra(note, onset_time)
+            self.results_logger.append_extra(
+                note, onset_time,
+                detected_freq_hz=detected_freq_hz if detected_freq_hz else "",
+                pitch_stability_cents=pitch_stability_cents if pitch_stability_cents is not None else "",
+            )
             return True
 
         target = self.targets[self.current_target_index]
@@ -86,7 +109,11 @@ class TargetMatcher:
 
         if onset_time < target["time"] - window:
             print(f"    Extra note at {onset_time:.3f}s: before target window")
-            self.results_logger.append_extra(note, onset_time)
+            self.results_logger.append_extra(
+                note, onset_time,
+                detected_freq_hz=detected_freq_hz if detected_freq_hz else "",
+                pitch_stability_cents=pitch_stability_cents if pitch_stability_cents is not None else "",
+            )
             return True
 
         raw_error = timing_error_fn(onset_time, target["time"])
@@ -107,6 +134,8 @@ class TargetMatcher:
             corrected_error,
             pitch_ok,
             timing_label,
+            detected_freq_hz=detected_freq_hz,
+            pitch_stability_cents=pitch_stability_cents,
         )
         return True
 
