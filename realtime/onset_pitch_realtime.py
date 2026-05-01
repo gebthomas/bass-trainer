@@ -32,6 +32,15 @@ RISE_RATIO = 1.6
 REFRACTORY_MS = 180
 HISTORY_BLOCKS = 3
 
+ONSET_DETECTOR_MODE = "smoothed_lockout"
+SMOOTHING_BLOCKS = 8
+SLOPE_THRESHOLD = 0.01
+RELEASE_THRESHOLD = MIN_RMS * 1.2
+FORCE_REARM_FRACTION_OF_BEAT = 0.30
+MIN_SPACING_FRACTION_OF_BEAT = 0.5
+SMOOTHED_LOCKOUT_SPACING_FRACTION_OF_BEAT = 0.25
+USE_TEMPO_SPACING = True
+
 PITCH_DELAY_SEC = 0.08
 PITCH_WINDOW_SEC = 0.12
 MATCH_WINDOW_FRACTION = 0.40
@@ -72,6 +81,10 @@ start_time = None
 last_onset_time = -999
 
 energy_history = deque(maxlen=HISTORY_BLOCKS)
+rms_history = deque(maxlen=SMOOTHING_BLOCKS)
+previous_smoothed_rms = None
+active_note = False
+
 audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
 
@@ -100,7 +113,7 @@ def load_offline_audio():
 
 
 def process_audio_chunk(audio, elapsed):
-    global last_onset_time
+    global last_onset_time, active_note, previous_smoothed_rms
 
     with audio_buffer_lock:
         audio_buffer.extend(audio)
@@ -108,14 +121,52 @@ def process_audio_chunk(audio, elapsed):
     rms = np.sqrt(np.mean(audio ** 2))
     peak = np.max(np.abs(audio))
 
-    recent_energy = np.mean(energy_history) if energy_history else rms
-    time_since_last = (elapsed - last_onset_time) * 1000
+    beat_dur = 60.0 / METRONOME_BPM
+    spacing_fraction = (SMOOTHED_LOCKOUT_SPACING_FRACTION_OF_BEAT
+                        if ONSET_DETECTOR_MODE == "smoothed_lockout"
+                        else MIN_SPACING_FRACTION_OF_BEAT)
+    min_spacing_sec = max(REFRACTORY_MS / 1000.0,
+                          spacing_fraction * beat_dur) if USE_TEMPO_SPACING else (REFRACTORY_MS / 1000.0)
+    spaced = (elapsed - last_onset_time) > min_spacing_sec
 
-    strong_enough = rms > MIN_RMS
-    rising_fast = rms > recent_energy * RISE_RATIO
-    outside_refractory = time_since_last > REFRACTORY_MS
+    onset_detected = False
 
-    if strong_enough and rising_fast and outside_refractory:
+    if ONSET_DETECTOR_MODE == "rms_rise":
+        recent_energy = np.mean(energy_history) if energy_history else rms
+        strong_enough = rms > MIN_RMS
+        rising_fast = rms > recent_energy * RISE_RATIO
+
+        if strong_enough and rising_fast and spaced:
+            onset_detected = True
+
+    elif ONSET_DETECTOR_MODE == "smoothed_lockout":
+        rms_history.append(rms)
+        smoothed_rms = np.mean(rms_history)
+        slope = 0.0 if previous_smoothed_rms is None else smoothed_rms - previous_smoothed_rms
+
+        force_rearm_sec = FORCE_REARM_FRACTION_OF_BEAT * beat_dur
+        rearmed = False
+        if active_note:
+            if smoothed_rms <= RELEASE_THRESHOLD:
+                active_note = False
+                rearmed = True
+            elif (elapsed - last_onset_time) >= force_rearm_sec:
+                active_note = False
+                rearmed = True
+
+        strong_enough = smoothed_rms >= MIN_RMS
+        rising_fast = slope >= SLOPE_THRESHOLD
+
+        if not active_note and strong_enough and rising_fast and spaced:
+            onset_detected = True
+            active_note = True
+
+        previous_smoothed_rms = smoothed_rms
+
+    else:
+        raise ValueError(f"Unsupported ONSET_DETECTOR_MODE: {ONSET_DETECTOR_MODE}")
+
+    if onset_detected:
         last_onset_time = elapsed
         with onset_lock:
             pending_onsets.append(elapsed)
