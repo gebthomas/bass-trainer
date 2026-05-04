@@ -15,7 +15,7 @@ from core.targets import load_targets, timing_error_ms, compare_note
 from core.calibration import load_calibration, save_calibration, run_calibration_summary
 from core.matching import TargetMatcher
 from core.results import ResultsLogger
-from core.pitch import estimate_pitch
+from core.pitch import estimate_pitch, note_to_hz, cents_between
 from realtime.metronome import Metronome
 import sounddevice as sd
 
@@ -44,6 +44,13 @@ USE_TEMPO_SPACING = True
 DECAY_TAU_SEC = 0.8
 ENERGY_BREAK_RATIO = 2.2
 ATTACK_TRACK_SEC = 0.04
+
+TARGET_WINDOW_MODE = True
+TW_PRE_SEC = 0.10
+TW_POST_SEC = 0.35
+TW_PITCH_MATCH_CENTS = 50.0
+TW_CONFIDENT_RATIO = 0.25    # min pitch_match_ratio to include in adaptive offset
+TW_MIN_CONFIDENT_FOR_OFFSET = 4   # fall back to all_delays when fewer confident matches
 
 PITCH_DELAY_SEC = 0.08
 PITCH_WINDOW_SEC = 0.12
@@ -74,9 +81,9 @@ OFFLINE_MODE = True
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav"
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
-OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretted_finger" / "slow_quarter_clean.wav"
-OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
-APPLY_CALIBRATION_IN_OFFLINE_MODE = True
+OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "pentatonic_60_fretless_clean.wav"
+OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60_twopass.json"
+APPLY_CALIBRATION_IN_OFFLINE_MODE = False
 if OFFLINE_MODE:
     targets = load_targets(OFFLINE_TARGET_FILE)
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
@@ -257,6 +264,131 @@ def process_pending_onsets(elapsed, matcher):
                     pending_onsets.remove(onset_time)
 
 
+def run_target_window_mode(audio_data, targets, results_logger):
+    """Pitch-window scoring: no onset detection; scan each target window with pyin."""
+    print("Target-window mode: scanning pitch per target window.")
+
+    f0, voiced_flag, _ = librosa.pyin(
+        audio_data,
+        fmin=librosa.note_to_hz("E1"),
+        fmax=librosa.note_to_hz("G4"),
+        sr=SAMPLE_RATE,
+        frame_length=4096,
+        hop_length=512,
+    )
+    frame_times = librosa.times_like(f0, sr=SAMPLE_RATE, hop_length=512)
+
+    candidates = []   # list of (target, match_dict | None)
+
+    for target in targets:
+        t_target = target["time"]
+        target_hz = note_to_hz(target["note"])
+
+        window = (frame_times >= t_target - TW_PRE_SEC) & (frame_times <= t_target + TW_POST_SEC)
+        win_times  = frame_times[window]
+        win_f0     = f0[window]
+        win_voiced = voiced_flag[window]
+
+        n_frames = len(win_times)
+        n_voiced = int(np.sum(win_voiced))
+        voiced_ratio = n_voiced / n_frames if n_frames > 0 else 0.0
+
+        usable      = win_voiced & ~np.isnan(win_f0) & (win_f0 > 0)
+        usable_f0   = win_f0[usable]
+        usable_times = win_times[usable]
+
+        if not np.any(usable):
+            candidates.append((target, None))
+            continue
+
+        cents_errors = 1200.0 * np.log2(usable_f0 / target_hz)
+        match = np.abs(cents_errors) <= TW_PITCH_MATCH_CENTS
+        pitch_match_ratio = float(np.sum(match)) / len(usable_f0)
+
+        if not np.any(match):
+            candidates.append((target, None))
+            continue
+
+        first_time    = float(usable_times[match][0])
+        matched_f0    = usable_f0[match]
+        matched_cents = cents_errors[match]
+        median_freq   = float(np.median(matched_f0))
+        median_cents  = float(np.median(matched_cents))
+        stability     = (float(np.percentile(matched_cents, 75) - np.percentile(matched_cents, 25))
+                         if len(matched_cents) > 1 else 0.0)
+
+        candidates.append((target, {
+            "first_match_time":  first_time,
+            "delay_ms":          1000.0 * (first_time - t_target),
+            "median_freq_hz":    median_freq,
+            "median_cents_error": median_cents,
+            "stability_cents":   stability,
+            "pitch_match_ratio": pitch_match_ratio,
+            "voiced_ratio":      voiced_ratio,
+        }))
+
+    # Adaptive offset — prefer confident matches; fall back to all matches when too few
+    confident_delays = [
+        c["delay_ms"] for _, c in candidates
+        if c is not None and c["pitch_match_ratio"] >= TW_CONFIDENT_RATIO
+    ]
+    all_delays = [
+        c["delay_ms"] for _, c in candidates
+        if c is not None
+    ]
+
+    if len(confident_delays) >= TW_MIN_CONFIDENT_FOR_OFFSET:
+        adaptive_offset_ms = float(np.median(confident_delays))
+        offset_status = f"stable, from {len(confident_delays)} confident matches"
+    elif all_delays:
+        adaptive_offset_ms = float(np.median(all_delays))
+        n_conf = len(confident_delays)
+        offset_status = f"provisional, only {n_conf} confident match{'es' if n_conf != 1 else ''}"
+    else:
+        adaptive_offset_ms = 0.0
+        offset_status = "none"
+
+    print(f"Adaptive offset: {adaptive_offset_ms:+.0f} ms  ({offset_status})")
+
+    for target, c in candidates:
+        if c is None:
+            results_logger.append_miss(target)
+            print(f"  MISSED  {target['note']:>3} @ {target['time']:.3f}s")
+            continue
+
+        raw_delay_ms  = c["delay_ms"]
+        adj_delay_ms  = raw_delay_ms - adaptive_offset_ms
+        target_hz     = note_to_hz(target["note"])
+        error_cents   = cents_between(c["median_freq_hz"], target_hz)
+
+        if abs(adj_delay_ms) < 30:
+            timing_label = "tight"
+        elif abs(adj_delay_ms) < 80:
+            timing_label = "ok"
+        else:
+            timing_label = "off"
+
+        results_logger.append_hit(
+            target,
+            c["first_match_time"],
+            raw_delay_ms,
+            adj_delay_ms,
+            True,
+            timing_label,
+            target["note"],
+            detected_freq_hz=c["median_freq_hz"],
+            target_freq_hz=target_hz,
+            cents_error=error_cents,
+            pitch_stability_cents=c["stability_cents"],
+        )
+        print(
+            f"  HIT   {target['note']:>3} @ {target['time']:.3f}s"
+            f" | first={c['first_match_time']:.3f}s"
+            f" raw={raw_delay_ms:+.0f}ms  adj={adj_delay_ms:+.0f}ms"
+            f"  cents={error_cents:+.1f}  match={c['pitch_match_ratio']:.0%}"
+        )
+
+
 def callback(indata, frames, callback_time, status):
     global start_time, last_onset_time
 
@@ -275,6 +407,11 @@ def callback(indata, frames, callback_time, status):
 
 def run_offline_audio(matcher):
     audio_data = load_offline_audio()
+
+    if TARGET_WINDOW_MODE:
+        run_target_window_mode(audio_data, targets, matcher.results_logger)
+        return
+
     num_samples = len(audio_data)
     sample_index = 0
 
@@ -370,7 +507,8 @@ else:
 finally:
     if not OFFLINE_MODE:
         cleanup_audio(metronome)
-    matcher.finalize_remaining_targets()
+    if not TARGET_WINDOW_MODE:
+        matcher.finalize_remaining_targets()
 
     if CALIBRATION_MODE and not interrupted:
         calibration_errors = [
