@@ -81,8 +81,8 @@ OFFLINE_MODE = True
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav"
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
-OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "pentatonic_60_fretless_clean.wav"
-OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60_twopass.json"
+OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "repeated_60_A1_fretless.wav"
+OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "repeat_A1.json"
 APPLY_CALIBRATION_IN_OFFLINE_MODE = False
 if OFFLINE_MODE:
     targets = load_targets(OFFLINE_TARGET_FILE)
@@ -391,7 +391,7 @@ def run_target_window_mode(audio_data, targets, results_logger):
             adaptive_offset_ms=adaptive_offset_ms,
         )
         print(
-            f"  HIT   {target['note']:>3} @ {target['time']:.3f}s"
+            f"  {tw_status.upper():6s} {target['note']:>3} @ {target['time']:.3f}s"
             f" | first={c['first_match_time']:.3f}s"
             f" raw={raw_delay_ms:+.0f}ms  adj={adj_delay_ms:+.0f}ms"
             f"  cents={error_cents:+.1f}  match={c['pitch_match_ratio']:.0%}"
