@@ -352,7 +352,11 @@ def run_target_window_mode(audio_data, targets, results_logger):
 
     for target, c in candidates:
         if c is None:
-            results_logger.append_miss(target)
+            results_logger.append_miss(
+                target,
+                target_window_status="missed",
+                adaptive_offset_ms=adaptive_offset_ms,
+            )
             print(f"  MISSED  {target['note']:>3} @ {target['time']:.3f}s")
             continue
 
@@ -360,6 +364,7 @@ def run_target_window_mode(audio_data, targets, results_logger):
         adj_delay_ms  = raw_delay_ms - adaptive_offset_ms
         target_hz     = note_to_hz(target["note"])
         error_cents   = cents_between(c["median_freq_hz"], target_hz)
+        tw_status     = "strong" if c["pitch_match_ratio"] >= TW_CONFIDENT_RATIO else "weak"
 
         if abs(adj_delay_ms) < 30:
             timing_label = "tight"
@@ -380,6 +385,10 @@ def run_target_window_mode(audio_data, targets, results_logger):
             target_freq_hz=target_hz,
             cents_error=error_cents,
             pitch_stability_cents=c["stability_cents"],
+            pitch_match_ratio=c["pitch_match_ratio"],
+            voiced_ratio=c["voiced_ratio"],
+            target_window_status=tw_status,
+            adaptive_offset_ms=adaptive_offset_ms,
         )
         print(
             f"  HIT   {target['note']:>3} @ {target['time']:.3f}s"

@@ -19,6 +19,10 @@ class ResultsLogger:
         "target_freq_hz",
         "cents_error",
         "pitch_stability_cents",
+        "pitch_match_ratio",
+        "voiced_ratio",
+        "target_window_status",
+        "adaptive_offset_ms",
     ]
 
     def __init__(self, results_dir):
@@ -26,7 +30,8 @@ class ResultsLogger:
         self.results_dir = Path(results_dir)
 
     def append_hit(self, target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note,
-                   detected_freq_hz="", target_freq_hz="", cents_error="", pitch_stability_cents=""):
+                   detected_freq_hz="", target_freq_hz="", cents_error="", pitch_stability_cents="",
+                   pitch_match_ratio="", voiced_ratio="", target_window_status="", adaptive_offset_ms=""):
         self.results.append({
             "event_type": "hit",
             "target_note": target["note"],
@@ -41,9 +46,13 @@ class ResultsLogger:
             "target_freq_hz": target_freq_hz,
             "cents_error": cents_error,
             "pitch_stability_cents": pitch_stability_cents,
+            "pitch_match_ratio": pitch_match_ratio,
+            "voiced_ratio": voiced_ratio,
+            "target_window_status": target_window_status,
+            "adaptive_offset_ms": adaptive_offset_ms,
         })
 
-    def append_miss(self, target):
+    def append_miss(self, target, target_window_status="", adaptive_offset_ms=""):
         self.results.append({
             "event_type": "missed",
             "target_note": target["note"],
@@ -58,6 +67,10 @@ class ResultsLogger:
             "target_freq_hz": "",
             "cents_error": "",
             "pitch_stability_cents": "",
+            "pitch_match_ratio": "",
+            "voiced_ratio": "",
+            "target_window_status": target_window_status,
+            "adaptive_offset_ms": adaptive_offset_ms,
         })
 
     def append_extra(self, note, onset_time, detected_freq_hz="", pitch_stability_cents=""):
@@ -75,6 +88,10 @@ class ResultsLogger:
             "target_freq_hz": "",
             "cents_error": "",
             "pitch_stability_cents": pitch_stability_cents,
+            "pitch_match_ratio": "",
+            "voiced_ratio": "",
+            "target_window_status": "",
+            "adaptive_offset_ms": "",
         })
 
     def print_summary(self):
