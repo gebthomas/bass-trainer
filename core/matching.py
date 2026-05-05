@@ -30,6 +30,7 @@ class TargetMatcher:
         self.results_logger = results_logger
         self.current_target_index = 0
         self.target_candidates = []
+        self.recently_finalized = []   # drained by caller for live feedback
 
     def add_onset_candidate(self, onset_time, note, raw_error, corrected_error, pitch_ok, timing_label,
                             detected_freq_hz=None, pitch_stability_cents=None):
@@ -48,6 +49,11 @@ class TargetMatcher:
         if not self.target_candidates:
             print(f"    Missed target {target['note']} @ {target['time']:.3f}s")
             self.results_logger.append_miss(target)
+            self.recently_finalized.append({
+                "type": "miss",
+                "target_note": target["note"],
+                "target_time": target["time"],
+            })
             return
 
         correct_candidates = [c for c in self.target_candidates if c["pitch_ok"]]
@@ -75,6 +81,16 @@ class TargetMatcher:
                     cents_error=error_cents,
                     pitch_stability_cents=stability if stability is not None else "",
                 )
+                self.recently_finalized.append({
+                    "type": "hit",
+                    "target_note": target["note"],
+                    "played_note": candidate["note"],
+                    "corrected_error": candidate["corrected_error"],
+                    "timing_label": candidate["timing_label"],
+                    "cents_error": error_cents,
+                    "stability_cents": stability,
+                    "pitch_ok": candidate["pitch_ok"],
+                })
             else:
                 self.results_logger.append_extra(
                     candidate["note"], candidate["onset_time"],
@@ -86,10 +102,12 @@ class TargetMatcher:
 
     def process_onset_against_targets(self, onset_time, note, timing_error_fn, compare_note_fn,
                                        detected_freq_hz=None, pitch_stability_cents=None):
+        corrected_onset_time = onset_time + self.timing_offset_ms / 1000.0
+
         while self.current_target_index < len(self.targets):
             target = self.targets[self.current_target_index]
             window = get_match_window(self.current_target_index, self.targets)
-            if onset_time > target["time"] + window:
+            if corrected_onset_time > target["time"] + window:
                 self._finalize_target(target)
                 self.current_target_index += 1
                 continue
@@ -107,7 +125,7 @@ class TargetMatcher:
         target = self.targets[self.current_target_index]
         window = get_match_window(self.current_target_index, self.targets)
 
-        if onset_time < target["time"] - window:
+        if corrected_onset_time < target["time"] - window:
             print(f"    Extra note at {onset_time:.3f}s: before target window")
             self.results_logger.append_extra(
                 note, onset_time,

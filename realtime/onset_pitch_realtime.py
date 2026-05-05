@@ -19,8 +19,9 @@ from core.pitch import estimate_pitch, note_to_hz, cents_between
 from realtime.metronome import Metronome
 import sounddevice as sd
 
-targets = load_targets("targets/targets.json")
-
+targets = load_targets(
+    PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
+)
 DEVICE_ID = 1
 SAMPLE_RATE = 48000
 CHANNELS = 2
@@ -32,7 +33,7 @@ RISE_RATIO = 1.6
 REFRACTORY_MS = 180
 HISTORY_BLOCKS = 3
 
-ONSET_DETECTOR_MODE = "decay_break"
+ONSET_DETECTOR_MODE = "smoothed_lockout"
 SMOOTHING_BLOCKS = 4
 SLOPE_THRESHOLD = 0.01
 RELEASE_THRESHOLD = MIN_RMS * 1.2
@@ -45,7 +46,7 @@ DECAY_TAU_SEC = 0.8
 ENERGY_BREAK_RATIO = 2.2
 ATTACK_TRACK_SEC = 0.04
 
-TARGET_WINDOW_MODE = True
+TARGET_WINDOW_MODE = False
 TW_PRE_SEC = 0.10
 TW_POST_SEC = 0.35
 TW_PITCH_MATCH_CENTS = 50.0
@@ -54,7 +55,7 @@ TW_MIN_CONFIDENT_FOR_OFFSET = 4   # fall back to all_delays when fewer confident
 
 PITCH_DELAY_SEC = 0.08
 PITCH_WINDOW_SEC = 0.12
-MATCH_WINDOW_FRACTION = 0.40
+MATCH_WINDOW_FRACTION = 0.50
 MIN_MATCH_WINDOW_SEC = 0.12
 MAX_MATCH_WINDOW_SEC = 0.40
 
@@ -70,9 +71,12 @@ COUNT_IN_REGULAR_BEAT_FREQ = 800
 PLAY_FIRST_BEAT_FREQ = 1200
 PLAY_REGULAR_BEAT_FREQ = 800
 TIMING_OFFSET_MS = -150
+LIVE_FEEDBACK = True
+AUTO_STOP_AFTER_TARGETS = True
+POST_TARGET_BEATS = 2
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
-OFFLINE_MODE = True
+OFFLINE_MODE = False
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_perfect.wav"
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_late_150ms.wav"
 #OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_missed_first.wav"
@@ -82,10 +86,7 @@ OFFLINE_MODE = True
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
 #OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
 OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "repeated_60_A1_fretless.wav"
-OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "repeat_A1.json"
-APPLY_CALIBRATION_IN_OFFLINE_MODE = False
-if OFFLINE_MODE:
-    targets = load_targets(OFFLINE_TARGET_FILE)
+OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
 
 start_time = None
@@ -222,6 +223,27 @@ def process_audio_chunk(audio, elapsed):
     energy_history.append(rms)
 
 
+def _print_live_feedback(event):
+    if event["type"] == "miss":
+        print(f"MISS {event['target_note']} @ {event['target_time']:.3f}s")
+        return
+
+    target  = event["target_note"]
+    played  = event["played_note"]
+    err     = event["corrected_error"]
+    label   = event["timing_label"]
+    cents   = event["cents_error"]
+    stab    = event["stability_cents"]
+
+    cents_str = f"{cents:+.0f}c" if cents != "" else "?c"
+    stab_str  = f"{stab:.0f}c"  if stab  is not None else "?"
+
+    if event["pitch_ok"]:
+        print(f"HIT {target}  timing={err:+.0f}ms {label}  pitch={cents_str}  stable={stab_str}")
+    else:
+        print(f"WRONG {played} -> {target}  timing={err:+.0f}ms {label}  pitch={cents_str}")
+
+
 def process_pending_onsets(elapsed, matcher):
     processed_onsets = []
     with onset_lock:
@@ -262,6 +284,11 @@ def process_pending_onsets(elapsed, matcher):
             for onset_time in processed_onsets:
                 if onset_time in pending_onsets:
                     pending_onsets.remove(onset_time)
+
+    if LIVE_FEEDBACK and not OFFLINE_MODE:
+        for event in matcher.recently_finalized:
+            _print_live_feedback(event)
+        matcher.recently_finalized.clear()
 
 
 def run_target_window_mode(audio_data, targets, results_logger):
@@ -507,6 +534,15 @@ try:
                     if CALIBRATION_MODE and matcher.current_target_index >= len(targets):
                         break
 
+                    if AUTO_STOP_AFTER_TARGETS and not CALIBRATION_MODE and targets:
+                        last_target_time = targets[-1]["time"]
+                        beat_dur = 60.0 / METRONOME_BPM
+                        if elapsed > last_target_time + POST_TARGET_BEATS * beat_dur:
+                            with onset_lock:
+                                no_pending = len(pending_onsets) == 0
+                            if no_pending:
+                                break
+
                 time.sleep(0.02)
 
 except KeyboardInterrupt:
@@ -518,6 +554,10 @@ finally:
         cleanup_audio(metronome)
     if not TARGET_WINDOW_MODE:
         matcher.finalize_remaining_targets()
+        if LIVE_FEEDBACK and not OFFLINE_MODE:
+            for event in matcher.recently_finalized:
+                _print_live_feedback(event)
+            matcher.recently_finalized.clear()
 
     if CALIBRATION_MODE and not interrupted:
         calibration_errors = [

@@ -113,10 +113,20 @@ class ResultsLogger:
         print(f"Extra notes: {len(extra_rows)}")
 
         if hit_rows:
+            wrong_pitch = sum(1 for r in hit_rows if not r["pitch_ok"])
+            cents_values = [float(r["cents_error"]) for r in hit_rows
+                            if r.get("cents_error") not in ("", None)]
+            stability_values = [float(r["pitch_stability_cents"]) for r in hit_rows
+                                if r.get("pitch_stability_cents") not in ("", None)]
+
             print(f"Average raw timing error: {np.mean(raw_errors):+.1f} ms")
             print(f"Average corrected timing error: {np.mean(corrected_errors):+.1f} ms")
             print(f"Average absolute corrected timing error: {np.mean(np.abs(corrected_errors)):.1f} ms")
-            print(f"Pitch accuracy: {pitch_accuracy:.1f}%")
+            print(f"Pitch accuracy: {pitch_accuracy:.1f}%  (wrong pitch: {wrong_pitch})")
+            if cents_values:
+                print(f"Median cents error: {np.median(cents_values):+.1f} c")
+            if stability_values:
+                print(f"Median pitch stability: {np.median(stability_values):.1f} c IQR")
         else:
             print("Average raw timing error: N/A")
             print("Average corrected timing error: N/A")
