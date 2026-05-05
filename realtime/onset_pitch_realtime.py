@@ -113,6 +113,8 @@ attack_peak_energy = 0.0
 audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
 constraint_counts = {"chord": 0, "scale": 0, "out": 0}
+CONSTRAINT_WEIGHTS = {"chord": 2, "scale": 1, "out": -2}
+constraint_score = 0
 
 onset_lock = threading.Lock()
 audio_buffer_lock = threading.Lock()
@@ -241,15 +243,21 @@ def print_constraint_summary():
     chord = constraint_counts["chord"]
     scale = constraint_counts["scale"]
     out   = constraint_counts["out"]
+    spn   = constraint_score / total
     print("\nConstraint summary")
     print(f"Chord tones:  {chord} ({chord / total * 100:.1f}%)")
     print(f"Scale tones:  {scale} ({scale / total * 100:.1f}%)")
     print(f"Outside:      {out} ({out   / total * 100:.1f}%)")
+    print(f"Score:        {constraint_score:+d}  ({spn:+.2f} per note)")
 
 
 def get_current_chord(elapsed_time):
+    if not progression:
+        return None
+    progression_duration = max(c["end"] for c in progression)
+    effective_time = elapsed_time % progression_duration
     for segment in progression:
-        if segment["start"] <= elapsed_time < segment["end"]:
+        if segment["start"] <= effective_time < segment["end"]:
             return segment["chord"]
     return None
 
@@ -276,6 +284,7 @@ def _print_live_feedback(event):
 
 
 def process_pending_onsets(elapsed, matcher):
+    global constraint_score
     processed_onsets = []
     with onset_lock:
         pending_snapshot = list(pending_onsets)
@@ -301,6 +310,7 @@ def process_pending_onsets(elapsed, matcher):
                         if chord:
                             classification = classify_note_against_chord(note, chord)
                             constraint_counts[classification] += 1
+                            constraint_score += CONSTRAINT_WEIGHTS[classification]
                             print(f"{classification.upper():5s} {note} over {chord}")
                     handled = matcher.process_onset_against_targets(
                         onset_time,
