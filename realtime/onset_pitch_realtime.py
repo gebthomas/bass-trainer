@@ -16,7 +16,7 @@ from core.calibration import load_calibration, save_calibration, run_calibration
 from core.matching import TargetMatcher
 from core.results import ResultsLogger
 from core.pitch import estimate_pitch, note_to_hz, cents_between
-from core.constraints import classify_note_against_chord
+from core.constraints import classify_note_against_chord, chord_at_time
 from realtime.metronome import Metronome
 import sounddevice as sd
 
@@ -252,14 +252,7 @@ def print_constraint_summary():
 
 
 def get_current_chord(elapsed_time):
-    if not progression:
-        return None
-    progression_duration = max(c["end"] for c in progression)
-    effective_time = elapsed_time % progression_duration
-    for segment in progression:
-        if segment["start"] <= effective_time < segment["end"]:
-            return segment["chord"]
-    return None
+    return chord_at_time(progression, elapsed_time, loop=True)
 
 
 def _print_live_feedback(event):

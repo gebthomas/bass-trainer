@@ -63,3 +63,17 @@ def is_note_chord_tone(note: str, chord: str) -> bool:
 def is_note_allowed(note: str, chord: str) -> bool:
     """True for chord tones and scale tones; False for outside notes."""
     return classify_note_against_chord(note, chord) in {"chord", "scale"}
+
+
+def chord_at_time(progression: list[dict], elapsed_time: float, loop: bool = True) -> str | None:
+    if not progression:
+        return None
+    if loop:
+        duration = max(c["end"] for c in progression)
+        effective_time = elapsed_time % duration
+    else:
+        effective_time = elapsed_time
+    for segment in progression:
+        if segment["start"] <= effective_time < segment["end"]:
+            return segment["chord"]
+    return None

@@ -10,6 +10,7 @@ from core.constraints import (
     classify_note_against_chord,
     is_note_chord_tone,
     is_note_allowed,
+    chord_at_time,
 )
 
 
@@ -91,6 +92,33 @@ def test_invalid_inputs():
             pass
 
 
+II_V_I_C = [
+    {"start": 0.0, "end": 2.0, "chord": "Dm7"},
+    {"start": 2.0, "end": 4.0, "chord": "G7"},
+    {"start": 4.0, "end": 6.0, "chord": "Cmaj7"},
+]
+
+
+def test_chord_at_time_basic():
+    assert chord_at_time(II_V_I_C, 0.5)  == "Dm7"
+    assert chord_at_time(II_V_I_C, 2.5)  == "G7"
+    assert chord_at_time(II_V_I_C, 4.5)  == "Cmaj7"
+
+
+def test_chord_at_time_loops():
+    assert chord_at_time(II_V_I_C, 6.5)  == "Dm7"
+    assert chord_at_time(II_V_I_C, 8.5)  == "G7"
+    assert chord_at_time(II_V_I_C, 10.5) == "Cmaj7"
+
+
+def test_chord_at_time_no_loop():
+    assert chord_at_time(II_V_I_C, 6.5, loop=False) is None
+
+
+def test_chord_at_time_empty():
+    assert chord_at_time([], 1.0) is None
+
+
 def run_all_tests():
     test_note_to_pitch_class()
     test_chord_to_pitch_classes()
@@ -99,6 +127,10 @@ def run_all_tests():
     test_is_note_chord_tone()
     test_is_note_allowed()
     test_invalid_inputs()
+    test_chord_at_time_basic()
+    test_chord_at_time_loops()
+    test_chord_at_time_no_loop()
+    test_chord_at_time_empty()
 
 
 if __name__ == "__main__":
