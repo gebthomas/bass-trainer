@@ -80,16 +80,14 @@ PROGRESSION_FILE = PROJECT_ROOT / "tests" / "progressions" / "ii_v_i_C.json"
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
 OFFLINE_MODE = False
-#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_perfect.wav"
-#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_late_150ms.wav"
-#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_missed_first.wav"
-#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "slow_extra_between.wav"
-#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_perfect.wav"
-#OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "audio" / "pentatonic_late_100ms.wav"
-#OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "slow_quarter.json"
-#OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "pentatonic_60.json"
 OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "repeated_60_A1_fretless.wav"
 OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
+if OFFLINE_MODE:
+    targets = load_targets(OFFLINE_TARGET_FILE)
+else:
+    targets = load_targets(DEFAULT_TARGET_FILE)
+
+APPLY_CALIBRATION_IN_OFFLINE_MODE = True
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
 
 progression = []
@@ -304,6 +302,9 @@ def process_pending_onsets(elapsed, matcher):
                             classification = classify_note_against_chord(note, chord)
                             constraint_counts[classification] += 1
                             constraint_score += CONSTRAINT_WEIGHTS[classification]
+                            matcher.results_logger.register_constraint(
+                                onset_time, chord, classification, CONSTRAINT_WEIGHTS[classification]
+                            )
                             print(f"{classification.upper():5s} {note} over {chord}")
                     handled = matcher.process_onset_against_targets(
                         onset_time,
@@ -526,6 +527,13 @@ if CALIBRATION_MODE:
 
 results_logger = ResultsLogger(RESULTS_DIR)
 matcher = TargetMatcher(targets, TIMING_OFFSET_MS, results_logger)
+
+if CONSTRAINT_MODE and progression:
+    for _t in targets:
+        _chord = chord_at_time(progression, _t["time"], loop=True)
+        if _chord:
+            results_logger._target_chord[_t["time"]] = _chord
+
 pending_onsets.clear()
 
 play_start_time = time.perf_counter()

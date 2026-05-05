@@ -23,15 +23,29 @@ class ResultsLogger:
         "voiced_ratio",
         "target_window_status",
         "adaptive_offset_ms",
+        "current_chord",
+        "constraint_classification",
+        "constraint_score",
     ]
 
     def __init__(self, results_dir):
         self.results = []
         self.results_dir = Path(results_dir)
+        self._onset_constraint = {}   # onset_time -> {chord, classification, score}
+        self._target_chord = {}       # target_time -> chord (for misses)
+
+    def register_constraint(self, onset_time, chord, classification, score_value):
+        self._onset_constraint[onset_time] = {
+            "current_chord": chord,
+            "constraint_classification": classification,
+            "constraint_score": score_value,
+        }
 
     def append_hit(self, target, onset_time, raw_error, corrected_error, pitch_ok, timing_label, note,
                    detected_freq_hz="", target_freq_hz="", cents_error="", pitch_stability_cents="",
-                   pitch_match_ratio="", voiced_ratio="", target_window_status="", adaptive_offset_ms=""):
+                   pitch_match_ratio="", voiced_ratio="", target_window_status="", adaptive_offset_ms="",
+                   current_chord="", constraint_classification="", constraint_score=""):
+        constraint = self._onset_constraint.pop(onset_time, {})
         self.results.append({
             "event_type": "hit",
             "target_note": target["note"],
@@ -50,9 +64,13 @@ class ResultsLogger:
             "voiced_ratio": voiced_ratio,
             "target_window_status": target_window_status,
             "adaptive_offset_ms": adaptive_offset_ms,
+            "current_chord": current_chord or constraint.get("current_chord", ""),
+            "constraint_classification": constraint_classification or constraint.get("constraint_classification", ""),
+            "constraint_score": constraint_score if constraint_score != "" else constraint.get("constraint_score", ""),
         })
 
-    def append_miss(self, target, target_window_status="", adaptive_offset_ms=""):
+    def append_miss(self, target, target_window_status="", adaptive_offset_ms="",
+                    current_chord="", constraint_classification="", constraint_score=""):
         self.results.append({
             "event_type": "missed",
             "target_note": target["note"],
@@ -71,9 +89,13 @@ class ResultsLogger:
             "voiced_ratio": "",
             "target_window_status": target_window_status,
             "adaptive_offset_ms": adaptive_offset_ms,
+            "current_chord": current_chord or self._target_chord.get(target["time"], ""),
+            "constraint_classification": constraint_classification,
+            "constraint_score": constraint_score,
         })
 
-    def append_extra(self, note, onset_time, detected_freq_hz="", pitch_stability_cents=""):
+    def append_extra(self, note, onset_time, detected_freq_hz="", pitch_stability_cents="",
+                     current_chord="", constraint_classification="", constraint_score=""):
         self.results.append({
             "event_type": "extra",
             "target_note": "",
@@ -92,6 +114,9 @@ class ResultsLogger:
             "voiced_ratio": "",
             "target_window_status": "",
             "adaptive_offset_ms": "",
+            "current_chord": current_chord,
+            "constraint_classification": constraint_classification,
+            "constraint_score": constraint_score,
         })
 
     def print_summary(self):
