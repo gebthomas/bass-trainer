@@ -16,6 +16,7 @@ from core.calibration import load_calibration, save_calibration, run_calibration
 from core.matching import TargetMatcher
 from core.results import ResultsLogger
 from core.pitch import estimate_pitch, note_to_hz, cents_between
+from core.constraints import is_note_allowed
 from realtime.metronome import Metronome
 import sounddevice as sd
 
@@ -74,6 +75,8 @@ TIMING_OFFSET_MS = -150
 LIVE_FEEDBACK = True
 AUTO_STOP_AFTER_TARGETS = True
 POST_TARGET_BEATS = 2
+CONSTRAINT_MODE = True
+PROGRESSION_FILE = PROJECT_ROOT / "tests" / "progressions" / "ii_v_i_C.json"
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
 OFFLINE_MODE = False
@@ -88,6 +91,11 @@ OFFLINE_MODE = False
 OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "repeated_60_A1_fretless.wav"
 OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 CALIBRATION_TARGETS = [{"time": float(i), "note": "D2"} for i in range(0, 8)]
+
+progression = []
+if CONSTRAINT_MODE:
+    with open(PROGRESSION_FILE, encoding="utf-8") as _f:
+        progression = json.load(_f)
 
 start_time = None
 last_onset_time = -999
@@ -223,6 +231,13 @@ def process_audio_chunk(audio, elapsed):
     energy_history.append(rms)
 
 
+def get_current_chord(elapsed_time):
+    for segment in progression:
+        if segment["start"] <= elapsed_time < segment["end"]:
+            return segment["chord"]
+    return None
+
+
 def _print_live_feedback(event):
     if event["type"] == "miss":
         print(f"MISS {event['target_note']} @ {event['target_time']:.3f}s")
@@ -265,6 +280,11 @@ def process_pending_onsets(elapsed, matcher):
                 segment = buffer_array[start_index:end_index]
                 freq, note, stability_cents = estimate_pitch(segment)
                 if freq is not None:
+                    if CONSTRAINT_MODE and not OFFLINE_MODE:
+                        chord = get_current_chord(onset_time)
+                        if chord:
+                            tag = "OK " if is_note_allowed(note, chord) else "BAD"
+                            print(f"{tag}  {note} over {chord}")
                     handled = matcher.process_onset_against_targets(
                         onset_time,
                         note,

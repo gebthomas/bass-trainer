@@ -3,3 +3,5 @@ data/*.wav
 experiments/*.wav
 results/*.csv
 tests/audio/*.wav
+__pycache__/
+*.pyc
