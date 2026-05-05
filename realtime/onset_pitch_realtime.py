@@ -112,6 +112,7 @@ attack_peak_energy = 0.0
 
 audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
+constraint_counts = {"chord": 0, "scale": 0, "out": 0}
 
 onset_lock = threading.Lock()
 audio_buffer_lock = threading.Lock()
@@ -231,6 +232,21 @@ def process_audio_chunk(audio, elapsed):
     energy_history.append(rms)
 
 
+def print_constraint_summary():
+    if not CONSTRAINT_MODE:
+        return
+    total = sum(constraint_counts.values())
+    if total == 0:
+        return
+    chord = constraint_counts["chord"]
+    scale = constraint_counts["scale"]
+    out   = constraint_counts["out"]
+    print("\nConstraint summary")
+    print(f"Chord tones:  {chord} ({chord / total * 100:.1f}%)")
+    print(f"Scale tones:  {scale} ({scale / total * 100:.1f}%)")
+    print(f"Outside:      {out} ({out   / total * 100:.1f}%)")
+
+
 def get_current_chord(elapsed_time):
     for segment in progression:
         if segment["start"] <= elapsed_time < segment["end"]:
@@ -284,6 +300,7 @@ def process_pending_onsets(elapsed, matcher):
                         chord = get_current_chord(onset_time)
                         if chord:
                             classification = classify_note_against_chord(note, chord)
+                            constraint_counts[classification] += 1
                             print(f"{classification.upper():5s} {note} over {chord}")
                     handled = matcher.process_onset_against_targets(
                         onset_time,
@@ -585,5 +602,6 @@ finally:
         ]
         run_calibration_summary(calibration_errors, save_calibration, CALIBRATION_CONFIG_PATH)
     results_logger.print_summary()
+    print_constraint_summary()
     if not CALIBRATION_MODE and results_logger.results:
         results_logger.save_csv()
