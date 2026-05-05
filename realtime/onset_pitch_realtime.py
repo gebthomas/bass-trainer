@@ -17,6 +17,7 @@ from core.matching import TargetMatcher
 from core.results import ResultsLogger
 from core.pitch import estimate_pitch, note_to_hz, cents_between
 from core.constraints import classify_note_against_chord, chord_at_time
+from core.practice_log import append_practice_log
 from realtime.metronome import Metronome
 import sounddevice as sd
 
@@ -81,6 +82,7 @@ CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
 OFFLINE_MODE = False
 OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "repeated_60_A1_fretless.wav"
+DEFAULT_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 if OFFLINE_MODE:
     targets = load_targets(OFFLINE_TARGET_FILE)
@@ -616,3 +618,12 @@ finally:
     print_constraint_summary()
     if not CALIBRATION_MODE and results_logger.results:
         results_logger.save_csv()
+        append_practice_log(
+            results_logger,
+            PROJECT_ROOT / "data" / "practice_log.csv",
+            {
+                "mode": "constraint" if CONSTRAINT_MODE else "target",
+                "bpm": METRONOME_BPM,
+                "exercise_name": PROGRESSION_FILE.name if CONSTRAINT_MODE else DEFAULT_TARGET_FILE.name,
+            },
+        )
