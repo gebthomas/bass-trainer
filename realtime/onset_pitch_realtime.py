@@ -16,7 +16,7 @@ from core.calibration import load_calibration, save_calibration, run_calibration
 from core.matching import TargetMatcher
 from core.results import ResultsLogger
 from core.pitch import estimate_pitch, note_to_hz, cents_between
-from core.constraints import is_note_allowed
+from core.constraints import classify_note_against_chord
 from realtime.metronome import Metronome
 import sounddevice as sd
 
@@ -283,8 +283,8 @@ def process_pending_onsets(elapsed, matcher):
                     if CONSTRAINT_MODE and not OFFLINE_MODE:
                         chord = get_current_chord(onset_time)
                         if chord:
-                            tag = "OK " if is_note_allowed(note, chord) else "BAD"
-                            print(f"{tag}  {note} over {chord}")
+                            classification = classify_note_against_chord(note, chord)
+                            print(f"{classification.upper():5s} {note} over {chord}")
                     handled = matcher.process_onset_against_targets(
                         onset_time,
                         note,
