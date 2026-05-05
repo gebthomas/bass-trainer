@@ -5,3 +5,4 @@ results/*.csv
 tests/audio/*.wav
 __pycache__/
 *.pyc
+data/practice_log.csv
