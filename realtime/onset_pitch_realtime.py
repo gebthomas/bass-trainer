@@ -618,12 +618,13 @@ finally:
     print_constraint_summary()
     if not CALIBRATION_MODE and results_logger.results:
         results_logger.save_csv()
-        append_practice_log(
-            results_logger,
-            PROJECT_ROOT / "data" / "practice_log.csv",
-            {
-                "mode": "constraint" if CONSTRAINT_MODE else "target",
-                "bpm": METRONOME_BPM,
-                "exercise_name": PROGRESSION_FILE.name if CONSTRAINT_MODE else DEFAULT_TARGET_FILE.name,
-            },
-        )
+        if not OFFLINE_MODE:
+            append_practice_log(
+                results_logger,
+                PROJECT_ROOT / "data" / "practice_log.csv",
+                {
+                    "mode": "constraint" if CONSTRAINT_MODE else "target",
+                    "bpm": METRONOME_BPM,
+                    "exercise_name": PROGRESSION_FILE.name if CONSTRAINT_MODE else DEFAULT_TARGET_FILE.name,
+                },
+            )
