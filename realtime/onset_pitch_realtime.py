@@ -76,12 +76,13 @@ TIMING_OFFSET_MS = -150
 LIVE_FEEDBACK = True
 AUTO_STOP_AFTER_TARGETS = True
 POST_TARGET_BEATS = 2
-CONSTRAINT_MODE = True
+CONSTRAINT_MODE = False
 PROGRESSION_FILE = PROJECT_ROOT / "tests" / "progressions" / "ii_v_i_C.json"
 CALIBRATION_CONFIG_PATH = PROJECT_ROOT / "config" / "calibration.json"
 RESULTS_DIR = PROJECT_ROOT / "results"
 OFFLINE_MODE = False
 OFFLINE_AUDIO_FILE = PROJECT_ROOT / "tests" / "real_audio" / "fretless_finger" / "repeated_60_A1_fretless.wav"
+#DEFAULT_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 DEFAULT_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 OFFLINE_TARGET_FILE = PROJECT_ROOT / "tests" / "targets" / "scales" / "major_C_60bpm_eighths.json"
 if OFFLINE_MODE:

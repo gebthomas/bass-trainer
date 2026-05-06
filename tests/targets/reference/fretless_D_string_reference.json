@@ -1,0 +1,56 @@
+[
+  {
+    "time": 1.0,
+    "note": "D2",
+    "string": "D",
+    "position": "open"
+  },
+  {
+    "time": 4.0,
+    "note": "F2",
+    "string": "D",
+    "position": 3
+  },
+  {
+    "time": 7.0,
+    "note": "G2",
+    "string": "D",
+    "position": 5
+  },
+  {
+    "time": 10.0,
+    "note": "A2",
+    "string": "D",
+    "position": 7
+  },
+  {
+    "time": 13.0,
+    "note": "B2",
+    "string": "D",
+    "position": 9
+  },
+  {
+    "time": 16.0,
+    "note": "D3",
+    "string": "D",
+    "position": 12
+  },
+  {
+    "time": 19.0,
+    "note": "F3",
+    "string": "D",
+    "position": 15
+  },
+  {
+    "time": 22.0,
+    "note": "G3",
+    "string": "D",
+    "position": 17
+  },
+  {
+    "time": 25.0,
+    "note": "A3",
+    "string": "D",
+    "position": 19
+  }
+]

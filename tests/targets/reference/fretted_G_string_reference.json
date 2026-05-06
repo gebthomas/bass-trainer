@@ -1,0 +1,62 @@
+[
+  {
+    "time": 1.0,
+    "note": "G2",
+    "string": "G",
+    "position": "open"
+  },
+  {
+    "time": 4.0,
+    "note": "Bb2",
+    "string": "G",
+    "position": 3
+  },
+  {
+    "time": 7.0,
+    "note": "C3",
+    "string": "G",
+    "position": 5
+  },
+  {
+    "time": 10.0,
+    "note": "D3",
+    "string": "G",
+    "position": 7
+  },
+  {
+    "time": 13.0,
+    "note": "E3",
+    "string": "G",
+    "position": 9
+  },
+  {
+    "time": 16.0,
+    "note": "G3",
+    "string": "G",
+    "position": 12
+  },
+  {
+    "time": 19.0,
+    "note": "Bb3",
+    "string": "G",
+    "position": 15
+  },
+  {
+    "time": 22.0,
+    "note": "C4",
+    "string": "G",
+    "position": 17
+  },
+  {
+    "time": 25.0,
+    "note": "D4",
+    "string": "G",
+    "position": 19
+  },
+  {
+    "time": 28.0,
+    "note": "G4",
+    "string": "G",
+    "position": 24
+  }
+]

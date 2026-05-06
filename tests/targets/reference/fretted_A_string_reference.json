@@ -1,0 +1,62 @@
+[
+  {
+    "time": 1.0,
+    "note": "A1",
+    "string": "A",
+    "position": "open"
+  },
+  {
+    "time": 4.0,
+    "note": "C2",
+    "string": "A",
+    "position": 3
+  },
+  {
+    "time": 7.0,
+    "note": "D2",
+    "string": "A",
+    "position": 5
+  },
+  {
+    "time": 10.0,
+    "note": "E2",
+    "string": "A",
+    "position": 7
+  },
+  {
+    "time": 13.0,
+    "note": "F#2",
+    "string": "A",
+    "position": 9
+  },
+  {
+    "time": 16.0,
+    "note": "A2",
+    "string": "A",
+    "position": 12
+  },
+  {
+    "time": 19.0,
+    "note": "C3",
+    "string": "A",
+    "position": 15
+  },
+  {
+    "time": 22.0,
+    "note": "D3",
+    "string": "A",
+    "position": 17
+  },
+  {
+    "time": 25.0,
+    "note": "E3",
+    "string": "A",
+    "position": 19
+  },
+  {
+    "time": 28.0,
+    "note": "A3",
+    "string": "A",
+    "position": 24
+  }
+]

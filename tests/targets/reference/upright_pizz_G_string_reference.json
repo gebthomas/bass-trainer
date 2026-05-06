@@ -1,0 +1,68 @@
+[
+  {
+    "time": 1.0,
+    "note": "G2",
+    "string": "G",
+    "position": "scale_1"
+  },
+  {
+    "time": 4.0,
+    "note": "A2",
+    "string": "G",
+    "position": "scale_2"
+  },
+  {
+    "time": 7.0,
+    "note": "B2",
+    "string": "G",
+    "position": "scale_3"
+  },
+  {
+    "time": 10.0,
+    "note": "C3",
+    "string": "G",
+    "position": "scale_4"
+  },
+  {
+    "time": 13.0,
+    "note": "D3",
+    "string": "G",
+    "position": "scale_5"
+  },
+  {
+    "time": 16.0,
+    "note": "E3",
+    "string": "G",
+    "position": "scale_6"
+  },
+  {
+    "time": 19.0,
+    "note": "F#3",
+    "string": "G",
+    "position": "scale_7"
+  },
+  {
+    "time": 22.0,
+    "note": "G3",
+    "string": "G",
+    "position": "scale_8"
+  },
+  {
+    "time": 25.0,
+    "note": "A3",
+    "string": "G",
+    "position": "scale_9"
+  },
+  {
+    "time": 28.0,
+    "note": "B3",
+    "string": "G",
+    "position": "scale_10"
+  },
+  {
+    "time": 31.0,
+    "note": "C4",
+    "string": "G",
+    "position": "scale_11"
+  }
+]

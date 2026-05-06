@@ -1,0 +1,68 @@
+[
+  {
+    "time": 1.0,
+    "note": "A1",
+    "string": "A",
+    "position": "scale_1"
+  },
+  {
+    "time": 4.0,
+    "note": "B1",
+    "string": "A",
+    "position": "scale_2"
+  },
+  {
+    "time": 7.0,
+    "note": "C#2",
+    "string": "A",
+    "position": "scale_3"
+  },
+  {
+    "time": 10.0,
+    "note": "D2",
+    "string": "A",
+    "position": "scale_4"
+  },
+  {
+    "time": 13.0,
+    "note": "E2",
+    "string": "A",
+    "position": "scale_5"
+  },
+  {
+    "time": 16.0,
+    "note": "F#2",
+    "string": "A",
+    "position": "scale_6"
+  },
+  {
+    "time": 19.0,
+    "note": "G#2",
+    "string": "A",
+    "position": "scale_7"
+  },
+  {
+    "time": 22.0,
+    "note": "A2",
+    "string": "A",
+    "position": "scale_8"
+  },
+  {
+    "time": 25.0,
+    "note": "B2",
+    "string": "A",
+    "position": "scale_9"
+  },
+  {
+    "time": 28.0,
+    "note": "C#3",
+    "string": "A",
+    "position": "scale_10"
+  },
+  {
+    "time": 31.0,
+    "note": "D3",
+    "string": "A",
+    "position": "scale_11"
+  }
+]

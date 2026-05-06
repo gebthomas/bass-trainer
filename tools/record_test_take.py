@@ -23,7 +23,8 @@ METRONOME_VOLUME = 0.35
 COUNT_IN_BEATS = 4
 BEATS_PER_MEASURE = 4
 
-RECORD_DURATION_SEC = 10.0
+RECORD_SECONDS = 36.0
+OUTPUT_FILE = "record_test_take.wav"
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,13 +32,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "output_path",
         nargs="?",
-        default="record_test_take.wav",
+        default=OUTPUT_FILE,
         help="Path to save the recorded WAV file.",
     )
     parser.add_argument(
         "--duration",
         type=float,
-        default=RECORD_DURATION_SEC,
+        default=RECORD_SECONDS,
         help="Recording duration in seconds.",
     )
     return parser.parse_args()
@@ -50,45 +51,24 @@ def compute_play_start_time() -> float:
     return now + count_in_duration
 
 
-def timestamped_audio_callback(audio_chunks, lock, indata, frames, callback_time, status):
-    if status:
-        print(status)
-
-    timestamp = time.perf_counter()
-
-    chunk = indata[:, 0].copy() if indata.ndim > 1 else indata.copy()
-    with lock:
-        audio_chunks.append((timestamp, chunk))
-
-
-def assemble_recording(audio_chunks, play_start_time, duration_sec):
-    required_samples = int(round(duration_sec * SAMPLE_RATE))
-    output = np.zeros(required_samples, dtype=np.float32)
-
-    for timestamp, chunk in audio_chunks:
-        start_sample = int(round((timestamp - play_start_time) * SAMPLE_RATE))
-        end_sample = start_sample + len(chunk)
-
-        out_start = max(start_sample, 0)
-        out_end = min(end_sample, required_samples)
-        if out_end <= out_start:
-            continue
-
-        chunk_start = max(0, -start_sample)
-        chunk_end = chunk_start + (out_end - out_start)
-        output[out_start:out_end] = chunk[chunk_start:chunk_end]
-
-    return output
-
-
 def record_take(output_path: Path, duration: float) -> None:
+    print(f"Recording duration: {duration} seconds")
+    print(f"Output file: {output_path}")
+
     audio_chunks = []
     audio_lock = threading.Lock()
+    recording_gate = threading.Event()
+    callback_count = [0]
     metronome = None
-    play_start_time = None
 
-    def callback(indata, frames, callback_time, status):
-        timestamped_audio_callback(audio_chunks, audio_lock, indata, frames, callback_time, status)
+    def callback(indata, _frames, _callback_time, status):
+        if status:
+            print(status)
+        callback_count[0] += 1
+        if recording_gate.is_set():
+            chunk = indata[:, 0].copy() if indata.ndim > 1 else indata.copy()
+            with audio_lock:
+                audio_chunks.append(chunk)
 
     stream = sd.InputStream(
         device=DEVICE_ID,
@@ -113,7 +93,13 @@ def record_take(output_path: Path, duration: float) -> None:
             metronome.start(play_start_time)
 
         delay = max(0.0, play_start_time - time.perf_counter())
-        print(f"Recording will start in {delay:.3f} s (perf_counter={play_start_time:.3f})")
+        print(f"Recording will start in {delay:.3f} s")
+
+        # Spin until play_start_time, then open the recording gate
+        while time.perf_counter() < play_start_time:
+            time.sleep(0.001)
+        recording_gate.set()
+
         end_time = play_start_time + duration
         while time.perf_counter() < end_time:
             time.sleep(0.01)
@@ -137,14 +123,31 @@ def record_take(output_path: Path, duration: float) -> None:
         except Exception:
             pass
 
-    recording = assemble_recording(chunks, play_start_time, duration)
+    required_samples = int(round(duration * SAMPLE_RATE))
+
+    if chunks:
+        raw = np.concatenate(chunks)
+    else:
+        raw = np.zeros(required_samples, dtype=np.float32)
+
+    # Trim or zero-pad to exact duration
+    if len(raw) >= required_samples:
+        recording = raw[:required_samples]
+    else:
+        recording = np.zeros(required_samples, dtype=np.float32)
+        recording[:len(raw)] = raw
+
+    print(f"Callback count:   {callback_count[0]}")
+    print(f"Total samples:    {len(raw)}")
+    print(f"Expected samples: {required_samples}")
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write(str(output_path), SAMPLE_RATE, recording)
 
     peak = float(np.max(np.abs(recording)))
     rms = float(np.sqrt(np.mean(recording ** 2)))
 
-    print(f"Saved {output_path}")
+    print(f"Saved: {output_path}")
     print(f"Peak: {peak:.6f}")
     print(f"RMS: {rms:.6f}")
 
