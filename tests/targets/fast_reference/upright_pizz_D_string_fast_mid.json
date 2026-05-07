@@ -1,0 +1,10 @@
+[
+  {"time": 1.0,   "note": "D2",  "string": "D", "position": "fast_1"},
+  {"time": 1.333, "note": "E2",  "string": "D", "position": "fast_2"},
+  {"time": 1.667, "note": "F#2", "string": "D", "position": "fast_3"},
+  {"time": 2.0,   "note": "G2",  "string": "D", "position": "fast_4"},
+  {"time": 2.333, "note": "A2",  "string": "D", "position": "fast_5"},
+  {"time": 2.667, "note": "B2",  "string": "D", "position": "fast_6"},
+  {"time": 3.0,   "note": "C#3", "string": "D", "position": "fast_7"},
+  {"time": 3.333, "note": "D3",  "string": "D", "position": "fast_8"}
+]

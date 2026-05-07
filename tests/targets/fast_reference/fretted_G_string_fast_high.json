@@ -1,0 +1,7 @@
+[
+  {"time": 1.0,  "note": "G3", "string": "G", "position": "fast_1"},
+  {"time": 1.25, "note": "A3", "string": "G", "position": "fast_2"},
+  {"time": 1.5,  "note": "B3", "string": "G", "position": "fast_3"},
+  {"time": 1.75, "note": "C4", "string": "G", "position": "fast_4"},
+  {"time": 2.0,  "note": "D4", "string": "G", "position": "fast_5"}
+]
