@@ -1,0 +1,5 @@
+Python 3.11.15
+> 0 MacBook Pro Microphone, Core Audio (1 in, 0 out)
+< 1 MacBook Pro Speakers, Core Audio (0 in, 2 out)
+  2 Microsoft Teams Audio, Core Audio (1 in, 1 out)
+  3 ZoomAudioDevice, Core Audio (2 in, 2 out)
