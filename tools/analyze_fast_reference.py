@@ -94,14 +94,14 @@ def _collect_frames(audio, win_start, win_end):
 def _aggregate(f0, voiced_flag, voiced_prob):
     n_total = len(f0)
     if n_total == 0:
-        return None, None, None, 0.0, 0, 0, 0.0
+        return None, None, None, 0.0, 0, 0, 0.0, {}, 0.0
 
     usable      = voiced_flag & ~np.isnan(f0) & (f0 > 0)
     n_voiced    = int(np.sum(usable))
     voiced_frac = n_voiced / n_total
 
     if n_voiced == 0:
-        return None, None, None, 0.0, 0, n_total, 0.0
+        return None, None, None, 0.0, 0, n_total, 0.0, {}, 0.0
 
     usable_f0   = f0[usable]
     usable_prob = voiced_prob[usable]
@@ -119,7 +119,7 @@ def _aggregate(f0, voiced_flag, voiced_prob):
     consensus      = votes[winner_semi] / total_weight if total_weight > 0 else 0.0
     candidate_note, _ = hz_to_note(candidate_hz)
 
-    return candidate_note, candidate_hz, winner_semi, consensus, n_voiced, n_total, voiced_frac
+    return candidate_note, candidate_hz, winner_semi, consensus, n_voiced, n_total, voiced_frac, votes, total_weight
 
 
 # ── Confidence scoring ────────────────────────────────────────────────────────
@@ -173,9 +173,15 @@ def analyze_target(target_index, targets, audio, input_latency_ms=0.0):
     truncated  = win_end > audio_dur
 
     f0, voiced_flag, voiced_prob = _collect_frames(audio, win_start, win_end)
-    cand_note, cand_hz, _, consensus, n_voiced, n_total, voiced_frac = _aggregate(
+    cand_note, cand_hz, _, consensus, n_voiced, n_total, voiced_frac, votes, total_weight = _aggregate(
         f0, voiced_flag, voiced_prob
     )
+
+    if votes and total_weight > 0:
+        sorted_votes = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        semitone_votes = [(s, v / total_weight) for s, v in sorted_votes]
+    else:
+        semitone_votes = []
 
     target_hz   = note_to_hz(target["note"])
     cents_error = cents_between(cand_hz, target_hz) if cand_hz is not None else None
@@ -206,6 +212,7 @@ def analyze_target(target_index, targets, audio, input_latency_ms=0.0):
         "confidence_tier":  tier,
         "timing_status":    timing,
         "pitch_status":     pitch,
+        "semitone_votes":   semitone_votes,
     }
 
 
