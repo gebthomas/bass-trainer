@@ -4,10 +4,12 @@
 #   --apply-calibration   load input_latency_ms from config/audio_calibration.json
 #   --target-index N      zoom panels 1–2 around target N (0-based)
 #   --save FILE           save to PNG instead of showing interactively
+#   --progression FILE    chord progression JSON for harmonic annotation
 #
 # Developer diagnostic — not polished UI.  Squint and iterate.
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from analyze_fast_reference import (
     SAMPLE_RATE,
     PYIN_FMIN, PYIN_FMAX, PYIN_FRAME_LENGTH, PYIN_HOP_LENGTH,
     analyze_target,
+    annotate_harmony,
 )
 from plot_onsets import compute_rms_blocks, detect_onsets
 from core.targets import load_targets
@@ -67,6 +70,14 @@ _STATUS_COLOR = {
 
 def _status_color(status):
     return _STATUS_COLOR.get(status, "#cccccc")
+
+
+_HARM_COLOR = {
+    "chord":           "#1a7a3a",   # dark green
+    "scale":           "#7a6a00",   # dark amber
+    "out":             "#8a0000",   # dark red
+    "pitch_uncertain": "#666666",   # gray
+}
 
 
 # ── Full-audio pyin trace ─────────────────────────────────────────────────────
@@ -232,10 +243,8 @@ def _draw_status(ax, results, selected_index):
         chord  = r.get("current_chord")
         hclass = r.get("harmonic_class")
         if chord is not None:
-            _HARM_COLOR = {"chord": "#1a7a3a", "scale": "#7a6a00",
-                           "out": "#8a0000", "pitch_uncertain": "#666666"}
             badge_color = _HARM_COLOR.get(hclass, "#444444")
-            badge = f"{chord}→{hclass}" if hclass else f"{chord}"
+            badge = f"{chord}→{hclass}" if hclass else chord
             ax.text(0.988, row + 0.27, badge,
                     fontsize=6, va="center", ha="right",
                     fontfamily="monospace", color=badge_color,
@@ -269,6 +278,7 @@ def _build_figure(wav_path, targets, audio, results, ft, f0, voiced,
     fig = plt.figure(figsize=(14, fig_h))
     title = (
         f"{wav_path.name}  ·  {Path(args.targets).name}"
+        + (f"  ·  {Path(args.progression).name}" if args.progression else "")
         + (f"  ·  latency {input_latency_ms:+.1f} ms" if abs(input_latency_ms) > 0.5 else "")
         + (f"  ·  zoom → target {args.target_index + 1}" if args.target_index is not None else "")
     )
@@ -303,6 +313,8 @@ def _parse_args():
                    help="Zoom panels 1–2 around target N (0-based)")
     p.add_argument("--save", metavar="FILE",
                    help="Save PNG instead of showing interactively")
+    p.add_argument("--progression", metavar="FILE",
+                   help="Chord progression JSON for harmonic annotation")
     return p.parse_args()
 
 
@@ -315,6 +327,12 @@ def main():
     if args.apply_calibration:
         input_latency_ms = load_input_latency()
         print(f"Calibration: input_latency_ms = {input_latency_ms:+.1f} ms")
+
+    progression = []
+    if args.progression:
+        with open(args.progression, encoding="utf-8") as fh:
+            progression = json.load(fh)
+        print(f"Progression: {Path(args.progression).name}  ({len(progression)} segments)")
 
     print(f"Loading: {wav_path.name}")
     audio   = librosa.load(str(wav_path), sr=SAMPLE_RATE, mono=True)[0]
@@ -334,6 +352,8 @@ def main():
     print("Analyzing targets...")
     results = [analyze_target(i, targets, audio, input_latency_ms)
                for i in range(len(targets))]
+    for r in results:
+        annotate_harmony(r, progression)
 
     print("Running pyin on full audio...")
     ft, f0, voiced = _pyin_full(audio)

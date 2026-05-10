@@ -1,0 +1,199 @@
+"""Practice exercise runner: analyze a recording against targets and a chord progression."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import librosa
+
+from core.targets import load_targets
+from core.audio_calibration import load_input_latency
+
+# Reuse analysis engine from analyze_fast_reference
+from tools.analyze_fast_reference import analyze_target, annotate_harmony, SAMPLE_RATE
+
+
+# ── Per-note table ────────────────────────────────────────────────────────────
+
+def _print_per_note(results):
+    print()
+    print(f"  {'#':>2}  {'Time':>7}  {'Target':<6}  {'Detected':<8}  {'Pitch':<22}  {'Chord':<7}  Harm")
+    print(f"  {'─' * 70}")
+    for i, r in enumerate(results):
+        detected = r["candidate_note"] if r["candidate_note"] else "—"
+        cents    = f" ({r['cents_error']:+.0f}c)" if r["cents_error"] is not None else ""
+        pitch    = r["pitch_status"] + cents
+        chord    = r.get("current_chord") or "—"
+        hclass   = r.get("harmonic_class") or "—"
+        print(f"  {i + 1:>2}  {r['target_time']:>6.3f}s  {r['target_note']:<6}  {detected:<8}  {pitch:<22}  {chord:<7}  {hclass}")
+
+
+# ── Practice suggestion ───────────────────────────────────────────────────────
+
+def _practice_suggestion(n_total, n_ok, n_pitch_err, n_missed, n_out, n_classified,
+                          pitch_errors, outside_notes):
+    suggestions = []
+
+    pitch_pct = n_ok / n_total * 100 if n_total else 0
+
+    if n_missed > 0:
+        suggestions.append(
+            f"You missed {n_missed} note(s) entirely — check timing and note placement."
+        )
+
+    if n_pitch_err > 0:
+        notes_str = ", ".join(f"{e['target']} ({e['cents']:+.0f}c)" for e in pitch_errors)
+        suggestions.append(
+            f"Intonation issues on: {notes_str}. Slow down and listen for the centre of the pitch."
+        )
+
+    if n_classified > 0 and n_out > 0:
+        out_pct = n_out / n_classified * 100
+        if out_pct > 30:
+            suggestions.append(
+                "Many outside notes — prioritise landing on chord tones (roots, 3rds, 5ths, 7ths)."
+            )
+        else:
+            out_str = ", ".join(f"{o['note']} over {o['chord']}" for o in outside_notes)
+            suggestions.append(
+                f"Outside note(s): {out_str}. Check chromatic approaches — resolve them by ear."
+            )
+
+    if pitch_pct == 100 and n_missed == 0 and n_out == 0:
+        suggestions.append("Everything solid — try increasing tempo or adding more outside colour.")
+    elif pitch_pct >= 80 and n_out == 0 and not suggestions:
+        suggestions.append("Good overall — tighten intonation on the marginal notes.")
+
+    return suggestions if suggestions else ["Keep working — record and listen back critically."]
+
+
+# ── Musical summary ───────────────────────────────────────────────────────────
+
+def _print_summary(results):
+    n = len(results)
+
+    n_ok      = sum(1 for r in results if r["pitch_status"] == "ok")
+    n_marg    = sum(1 for r in results if r["pitch_status"] == "pitch_marginal")
+    n_err     = sum(1 for r in results if r["pitch_status"] == "pitch_error")
+    n_missed  = sum(1 for r in results if r["pitch_status"] == "missed")
+    n_other   = n - n_ok - n_marg - n_err - n_missed
+
+    classified = [r for r in results if r.get("harmonic_class") not in (None, "pitch_uncertain")]
+    nc         = len(classified)
+    n_chord    = sum(1 for r in classified if r["harmonic_class"] == "chord")
+    n_scale    = sum(1 for r in classified if r["harmonic_class"] == "scale")
+    n_out_r    = sum(1 for r in classified if r["harmonic_class"] == "out")
+
+    pitch_errors  = [
+        {"target": r["target_note"], "cents": r["cents_error"]}
+        for r in results if r["pitch_status"] in ("pitch_error", "pitch_marginal")
+        and r["cents_error"] is not None
+    ]
+    outside_notes = [
+        {"note": r["candidate_note"] or r["target_note"], "chord": r.get("current_chord", "?")}
+        for r in classified if r["harmonic_class"] == "out"
+    ]
+
+    print()
+    print("═" * 50)
+    print("  MUSICAL SUMMARY")
+    print("═" * 50)
+    print(f"  Notes:          {n}")
+    print(f"  Pitch OK:       {n_ok}/{n}  ({n_ok / n * 100:.0f}%)")
+    if n_marg:
+        print(f"  Marginal:       {n_marg}  (>50c but ≤100c)")
+    if n_err:
+        print(f"  Pitch errors:   {n_err}  (>100c)")
+    if n_missed:
+        print(f"  Missed:         {n_missed}")
+    if n_other:
+        print(f"  Low/uncertain:  {n_other}")
+
+    if nc:
+        print()
+        print(f"  Harmonic  ({nc} classified):")
+        print(f"    Chord tones   {n_chord:>3}  ({n_chord / nc * 100:.0f}%)")
+        print(f"    Scale tones   {n_scale:>3}  ({n_scale / nc * 100:.0f}%)")
+        print(f"    Outside       {n_out_r:>3}  ({n_out_r / nc * 100:.0f}%)")
+
+    if outside_notes:
+        print()
+        print("  Outside notes:")
+        for o in outside_notes:
+            print(f"    {o['note']}  over  {o['chord']}")
+
+    if pitch_errors:
+        print()
+        print("  Pitch errors / marginal:")
+        for e in pitch_errors:
+            print(f"    {e['target']}  {e['cents']:+.0f}c")
+
+    suggestions = _practice_suggestion(
+        n, n_ok, n_err, n_missed, n_out_r, nc, pitch_errors, outside_notes
+    )
+    print()
+    print("  Practice suggestion:")
+    for s in suggestions:
+        print(f"    → {s}")
+
+    print()
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run a jazz bass practice exercise: pitch + harmonic feedback."
+    )
+    parser.add_argument("wav",     help="Path to WAV recording")
+    parser.add_argument("targets", help="Path to target JSON file")
+    parser.add_argument(
+        "--progression",
+        metavar="FILE",
+        help="Chord progression JSON (e.g. tests/progressions/ii_v_i_C.json)",
+    )
+    parser.add_argument(
+        "--apply-calibration",
+        action="store_true",
+        help="Apply input_latency_ms from config/audio_calibration.json",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = _parse_args()
+    wav_path    = Path(args.wav)
+    target_path = Path(args.targets)
+
+    print(f"Exercise:  {wav_path.name}")
+    print(f"Targets:   {target_path.name}")
+
+    input_latency_ms = 0.0
+    if args.apply_calibration:
+        input_latency_ms = load_input_latency()
+        print(f"Latency:   {input_latency_ms:+.1f}ms")
+
+    progression = []
+    if args.progression:
+        with open(args.progression, encoding="utf-8") as fh:
+            progression = json.load(fh)
+        print(f"Chords:    {Path(args.progression).name}  ({len(progression)} segments)")
+
+    audio   = librosa.load(str(wav_path), sr=SAMPLE_RATE, mono=True)[0]
+    targets = load_targets(target_path)
+    print(f"Audio:     {len(audio) / SAMPLE_RATE:.2f}s  |  {len(targets)} targets")
+
+    results = [analyze_target(i, targets, audio, input_latency_ms) for i in range(len(targets))]
+    for r in results:
+        annotate_harmony(r, progression)
+
+    _print_per_note(results)
+    _print_summary(results)
+
+
+if __name__ == "__main__":
+    main()
