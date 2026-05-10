@@ -65,6 +65,9 @@ def is_note_allowed(note: str, chord: str) -> bool:
     return classify_note_against_chord(note, chord) in {"chord", "scale"}
 
 
+CONSTRAINT_WEIGHTS: dict[str, int] = {"chord": 2, "scale": 1, "out": -2}
+
+
 def chord_at_time(progression: list[dict], elapsed_time: float, loop: bool = True) -> str | None:
     if not progression:
         return None

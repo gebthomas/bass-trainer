@@ -16,7 +16,7 @@ from core.calibration import load_calibration, save_calibration, run_calibration
 from core.matching import TargetMatcher
 from core.results import ResultsLogger
 from core.pitch import estimate_pitch, note_to_hz, cents_between
-from core.constraints import classify_note_against_chord, chord_at_time
+from core.constraints import classify_note_against_chord, chord_at_time, CONSTRAINT_WEIGHTS
 from core.practice_log import append_practice_log
 from realtime.metronome import Metronome
 import sounddevice as sd
@@ -114,7 +114,6 @@ attack_peak_energy = 0.0
 audio_buffer = deque(maxlen=int(SAMPLE_RATE * 2))
 pending_onsets = []
 constraint_counts = {"chord": 0, "scale": 0, "out": 0}
-CONSTRAINT_WEIGHTS = {"chord": 2, "scale": 1, "out": -2}
 constraint_score = 0
 
 onset_lock = threading.Lock()

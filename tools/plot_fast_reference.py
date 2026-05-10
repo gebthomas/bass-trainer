@@ -229,6 +229,18 @@ def _draw_status(ax, results, selected_index):
                     fontsize=6, va="center", ha="left",
                     fontfamily="monospace", color="#444444", clip_on=True)
 
+        chord  = r.get("current_chord")
+        hclass = r.get("harmonic_class")
+        if chord is not None:
+            _HARM_COLOR = {"chord": "#1a7a3a", "scale": "#7a6a00",
+                           "out": "#8a0000", "pitch_uncertain": "#666666"}
+            badge_color = _HARM_COLOR.get(hclass, "#444444")
+            badge = f"{chord}→{hclass}" if hclass else f"{chord}"
+            ax.text(0.988, row + 0.27, badge,
+                    fontsize=6, va="center", ha="right",
+                    fontfamily="monospace", color=badge_color,
+                    fontweight="bold", clip_on=True)
+
     # Highlight the zoomed target
     if selected_index is not None and 0 <= selected_index < n:
         row = n - 1 - selected_index

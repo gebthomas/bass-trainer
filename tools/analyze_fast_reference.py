@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import librosa
 from core.targets import load_targets
 from core.pitch import note_to_hz, hz_to_note, cents_between
 from core.audio_calibration import load_input_latency, effective_target_time
+from core.constraints import chord_at_time, classify_note_against_chord
 
 # ── Audio / pyin ──────────────────────────────────────────────────────────────
 
@@ -216,6 +218,34 @@ def analyze_target(target_index, targets, audio, input_latency_ms=0.0):
     }
 
 
+# ── Harmonic annotation ───────────────────────────────────────────────────────
+
+def annotate_harmony(result, progression):
+    """Attach current_chord and harmonic_class to a result dict in-place.
+
+    harmonic_class values: "chord" | "scale" | "out" | "pitch_uncertain" | None
+      None            — no progression supplied, or no chord at this time
+      "pitch_uncertain" — confidence_tier is not "medium" or "high"
+      "chord"/"scale"/"out" — classification of candidate_note against the chord
+    """
+    if not progression:
+        result["current_chord"]  = None
+        result["harmonic_class"] = None
+        return result
+
+    chord = chord_at_time(progression, result["target_time"], loop=True)
+    result["current_chord"] = chord
+
+    if chord is None or result["candidate_note"] is None:
+        result["harmonic_class"] = None
+    elif result["confidence_tier"] not in ("medium", "high"):
+        result["harmonic_class"] = "pitch_uncertain"
+    else:
+        result["harmonic_class"] = classify_note_against_chord(result["candidate_note"], chord)
+
+    return result
+
+
 # ── Print: per-target block ───────────────────────────────────────────────────
 
 _DIV = "─" * 60
@@ -257,19 +287,28 @@ def _print_target(idx, r):
     print(f"  Timing status:   {r['timing_status']}")
     print(f"  Pitch status:    {r['pitch_status']}")
 
+    if r.get("current_chord") is not None:
+        hclass = r["harmonic_class"] or "—"
+        print(f"  Chord:           {r['current_chord']:<6}  →  {hclass}")
+
 
 # ── Print: summary table ──────────────────────────────────────────────────────
 
 def _print_summary(results):
-    print(f"\n{'═' * 92}")
+    has_harmony = any(r.get("current_chord") is not None for r in results)
+
+    width = 103 if has_harmony else 92
+    print(f"\n{'═' * width}")
     print("  SUMMARY")
-    print(f"{'═' * 92}")
+    print(f"{'═' * width}")
 
     hdr = (f"  {'#':>2}  {'Note':<5}  {'Time':>7}  {'WinDur':>6}  "
            f"{'Candidate':<6}  {'Cents':>7}  {'V/Tot':>9}  "
            f"{'Consensus':>9}  {'Tier':<9}  {'Timing':<8}  Pitch")
+    if has_harmony:
+        hdr += f"  {'Chord':<6}  Harm"
     print(hdr)
-    print(f"  {'─' * 88}")
+    print(f"  {'─' * (width - 2)}")
 
     for i, r in enumerate(results):
         cand  = r["candidate_note"] if r["candidate_note"] else "—"
@@ -277,13 +316,18 @@ def _print_summary(results):
         vtot  = f"{r['voiced_frames']}/{r['total_frames']} {r['voiced_fraction'] * 100:.0f}%"
         cons  = f"{r['pitch_consensus'] * 100:.1f}%"
         trunc = "*" if r["truncated"] else " "
-        print(
+        row = (
             f"  {i + 1:>2}  {r['target_note']:<5}  {r['target_time']:>6.3f}s"
             f"  {r['win_dur'] * 1000:>4.0f}ms  "
             f"{cand:<6}  {cents:>7}  {vtot:>9}  "
             f"{cons:>9}  {r['confidence_tier']:<9}  "
             f"{r['timing_status']:<8}  {r['pitch_status']}{trunc}"
         )
+        if has_harmony:
+            chord  = r.get("current_chord") or "—"
+            hclass = r.get("harmonic_class") or "—"
+            row += f"  {chord:<6}  {hclass}"
+        print(row)
 
     n = len(results)
     counts = {
@@ -323,6 +367,23 @@ def _print_summary(results):
     if any(r["truncated"] for r in results):
         print("\n  * window truncated — recording ends before window close")
 
+    # Harmonic breakdown — only when a progression was supplied
+    classified = [r for r in results
+                  if r.get("harmonic_class") not in (None, "pitch_uncertain")]
+    uncertain  = [r for r in results if r.get("harmonic_class") == "pitch_uncertain"]
+    if classified or uncertain:
+        nc = len(classified)
+        n_chord = sum(1 for r in classified if r["harmonic_class"] == "chord")
+        n_scale = sum(1 for r in classified if r["harmonic_class"] == "scale")
+        n_out   = sum(1 for r in classified if r["harmonic_class"] == "out")
+        print(f"\n  Harmonic classification  ({nc} medium/high-confidence targets):")
+        if nc:
+            print(f"    chord tones   {n_chord:>3}  ({n_chord / nc * 100:.0f}%)")
+            print(f"    scale tones   {n_scale:>3}  ({n_scale / nc * 100:.0f}%)")
+            print(f"    outside       {n_out:>3}  ({n_out / nc * 100:.0f}%)")
+        if uncertain:
+            print(f"    pitch_uncertain (excluded from above): {len(uncertain)}")
+
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -337,6 +398,11 @@ def _parse_args():
         "--apply-calibration",
         action="store_true",
         help="Shift analysis windows by input_latency_ms from config/audio_calibration.json",
+    )
+    parser.add_argument(
+        "--progression",
+        metavar="FILE",
+        help="Chord progression JSON for harmonic classification (e.g. tests/progressions/ii_v_i_C.json)",
     )
     return parser.parse_args()
 
@@ -359,12 +425,22 @@ def main():
     else:
         print("Calibration:  off (--apply-calibration not set)")
 
+    progression = []
+    if args.progression:
+        with open(args.progression, encoding="utf-8") as fh:
+            progression = json.load(fh)
+        print(f"Progression:  {Path(args.progression).name}  ({len(progression)} segments)")
+    else:
+        print("Progression:  none (--progression not set)")
+
     audio   = librosa.load(str(wav_path), sr=SAMPLE_RATE, mono=True)[0]
     targets = load_targets(target_path)
 
     print(f"Audio:   {len(audio) / SAMPLE_RATE:.2f}s  |  Targets: {len(targets)}")
 
     results = [analyze_target(i, targets, audio, input_latency_ms) for i in range(len(targets))]
+    for r in results:
+        annotate_harmony(r, progression)
 
     for i, r in enumerate(results):
         _print_target(i, r)
