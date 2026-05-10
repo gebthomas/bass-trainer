@@ -6,3 +6,4 @@ tests/audio/*.wav
 __pycache__/
 *.pyc
 data/practice_log.csv.DS_Store
+tests/real_audio/reference/fast_reference/*.png
