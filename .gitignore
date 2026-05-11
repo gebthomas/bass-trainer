@@ -7,3 +7,7 @@ __pycache__/
 *.pyc
 data/practice_log.csv.DS_Store
 tests/real_audio/reference/fast_reference/*.png
+tests/audio/practice_tracks/*.wav
+tests/real_audio/jazz/session_*.wav
+tests/real_audio/jazz/sync_test*.wav
+tests/real_audio/jazz/*take*.wav

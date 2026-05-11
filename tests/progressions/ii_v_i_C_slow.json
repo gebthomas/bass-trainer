@@ -1,0 +1,5 @@
+[
+  {"start": 0, "end": 4,  "chord": "Dm7"},
+  {"start": 4, "end": 8,  "chord": "G7"},
+  {"start": 8, "end": 16, "chord": "Cmaj7"}
+]

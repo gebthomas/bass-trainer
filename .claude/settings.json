@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python tools/run_jazz_exercise.py tests/real_audio/reference/jazz/ii_v_i_musical_line.wav tests/targets/jazz/ii_v_i_musical_line.json --progression tests/progressions/ii_v_i_C.json)"
+    ]
+  }
+}
