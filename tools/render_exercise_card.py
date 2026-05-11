@@ -23,16 +23,27 @@ from core.targets import load_targets
 from core.constraints import chord_at_time, PITCH_CLASS
 
 
-# ── ANSI colours ──────────────────────────────────────────────────────────────
+# ── ANSI colour tables ────────────────────────────────────────────────────────
 
-_ANSI_STRING: dict[str, str] = {
+# Foreground-only style
+_FG_STRING: dict[str, str] = {
     "E": "\033[91m",   # bright red
     "A": "\033[94m",   # bright blue
     "D": "\033[92m",   # bright green
     "G": "\033[95m",   # bright magenta
 }
+
+# Background style: (bg_code, fg_code)
+_BG_STRING: dict[str, tuple[str, str]] = {
+    "E": ("\033[41m",  "\033[97m"),   # red bg, bright white fg
+    "A": ("\033[44m",  "\033[97m"),   # blue bg, bright white fg
+    "D": ("\033[42m",  "\033[30m"),   # green bg, black fg
+    "G": ("\033[45m",  "\033[97m"),   # magenta bg, bright white fg
+}
+
 _RESET = "\033[0m"
 _BOLD  = "\033[1m"
+_NORM  = "\033[22m"   # normal intensity — turns off bold without resetting colors
 
 _STRING_LABEL: dict[str, str] = {
     "E": "red",
@@ -100,14 +111,6 @@ def degree_label(note: str, chord: str) -> str:
     return _DEGREE_LABELS.get(quality, _CHROMATIC_LABELS).get(interval, "?")
 
 
-def string_color(string_name: str, use_color: bool = True) -> tuple[str, str]:
-    """Return (ANSI prefix, ANSI suffix) for a bass string name (E/A/D/G)."""
-    if not use_color:
-        return "", ""
-    code = _ANSI_STRING.get(string_name.upper(), "")
-    return (code, _RESET) if code else ("", "")
-
-
 def group_targets_by_measure(
     targets: list[dict],
     progression: list[dict],
@@ -145,20 +148,38 @@ _CHORD_COL_W = 8   # visible characters reserved for the chord name column
 _DEG_COL_W   = 4   # visible characters per degree cell
 
 
-def _degree_cell(deg: str, string_name: str, use_color: bool) -> str:
-    """Return a colour-coded, fixed-width degree cell string."""
-    fg, rst = string_color(string_name, use_color)
-    # Root is bold so it reads clearly as the anchor note.
-    bold = _BOLD if (deg == "R" and use_color and fg) else ""
-    end  = _RESET if bold else rst
-    label = f"{fg}{bold}{deg}{end}"
-    pad   = " " * max(0, _DEG_COL_W - len(deg))
-    return label + pad
+def _degree_cell(deg: str, string_name: str, use_color: bool, style: str = "background") -> str:
+    """Return a colour-coded, fixed-width degree cell string.
+
+    Background style colors the full cell width (text + padding) so adjacent
+    cells form solid colored blocks.  Foreground style colors text only.
+    """
+    pad = " " * max(0, _DEG_COL_W - len(deg))
+    if not use_color:
+        return deg + pad
+
+    s = string_name.upper()
+    is_root = deg == "R"
+
+    if style == "background":
+        bg, fg = _BG_STRING.get(s, ("", ""))
+        if not bg:
+            return deg + pad
+        bold_on  = _BOLD if is_root else ""
+        bold_off = _NORM if is_root else ""   # _NORM drops bold but keeps bg/fg colors
+        return f"{bg}{fg}{bold_on}{deg}{bold_off}{pad}{_RESET}"
+    else:  # foreground
+        fg = _FG_STRING.get(s, "")
+        if not fg:
+            return deg + pad
+        bold = _BOLD if is_root else ""
+        return f"{fg}{bold}{deg}{_RESET}{pad}"
 
 
 def render_card(
     groups: list[tuple[str, list[dict]]],
     use_color: bool = True,
+    style: str = "background",
 ) -> list[str]:
     """Return display lines, one per chord/measure group.
 
@@ -174,6 +195,7 @@ def render_card(
                 degree_label(t.get("note", "?"), chord),
                 t.get("string", ""),
                 use_color,
+                style,
             )
             for t in targets
         )
@@ -182,12 +204,19 @@ def render_card(
     return lines
 
 
-def render_legend(use_color: bool = True) -> str:
+def render_legend(use_color: bool = True, style: str = "background") -> str:
     """Return a one-line string legend."""
     parts = []
     for s, desc in _STRING_LABEL.items():
-        fg, rst = string_color(s, use_color)
-        parts.append(f"{fg}{s}{rst} = {desc}")
+        if not use_color:
+            parts.append(f"{s} = {desc}")
+        elif style == "background":
+            bg, fg = _BG_STRING.get(s, ("", ""))
+            block = f"{bg}{fg} {s} {_RESET}" if bg else s
+            parts.append(f"{block} = {desc}")
+        else:
+            fg = _FG_STRING.get(s, "")
+            parts.append(f"{fg}{s}{_RESET} = {desc}")
     return "Strings:  " + "   ".join(parts)
 
 
@@ -206,25 +235,29 @@ def _parse_args() -> argparse.Namespace:
                    help="Notes per display row (default: 4)")
     p.add_argument("--no-color", action="store_true",
                    help="Disable ANSI colour output")
+    p.add_argument("--color-style", choices=["foreground", "background"],
+                   default="background", metavar="{foreground,background}",
+                   help="Color style: background (default) or foreground")
     return p.parse_args()
 
 
 def main() -> None:
     args      = _parse_args()
     use_color = not args.no_color
+    style     = args.color_style
 
     targets = load_targets(args.targets)
     with open(args.progression, encoding="utf-8") as fh:
         progression = json.load(fh)
 
     groups = group_targets_by_measure(targets, progression, args.beats_per_measure)
-    lines  = render_card(groups, use_color)
+    lines  = render_card(groups, use_color, style)
 
     print()
     for line in lines:
         print(" ", line)
     print()
-    print(" ", render_legend(use_color))
+    print(" ", render_legend(use_color, style))
     print()
 
 

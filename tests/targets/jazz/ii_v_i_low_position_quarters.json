@@ -1,0 +1,18 @@
+[
+  {"time":  0, "note": "D2", "string": "D", "position": "ii-1"},
+  {"time":  1, "note": "F2", "string": "D", "position": "ii-2"},
+  {"time":  2, "note": "A2", "string": "A", "position": "ii-3"},
+  {"time":  3, "note": "C3", "string": "A", "position": "ii-4"},
+  {"time":  4, "note": "B2", "string": "A", "position": "v-1"},
+  {"time":  5, "note": "G2", "string": "D", "position": "v-2"},
+  {"time":  6, "note": "F2", "string": "D", "position": "v-3"},
+  {"time":  7, "note": "D2", "string": "D", "position": "v-4"},
+  {"time":  8, "note": "E2", "string": "D", "position": "i-1"},
+  {"time":  9, "note": "G2", "string": "D", "position": "i-2"},
+  {"time": 10, "note": "B2", "string": "A", "position": "i-3"},
+  {"time": 11, "note": "G2", "string": "D", "position": "i-4"},
+  {"time": 12, "note": "E2", "string": "D", "position": "i-5"},
+  {"time": 13, "note": "D2", "string": "D", "position": "i-6"},
+  {"time": 14, "note": "C2", "string": "A", "position": "i-7"},
+  {"time": 15, "note": "G1", "string": "E", "position": "i-8"}
+]

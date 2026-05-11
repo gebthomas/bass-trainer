@@ -19,10 +19,13 @@ from tools.analyze_fast_reference import analyze_target, annotate_harmony, SAMPL
 
 # ── Per-note table ────────────────────────────────────────────────────────────
 
-def _print_per_note(results, time_offset=0.0):
-    show_wav = time_offset != 0.0
+def _print_per_note(results, time_offset=0.0, beat_unit=False):
+    show_wav = time_offset != 0.0 or beat_unit
     print()
-    if show_wav:
+    if beat_unit:
+        print(f"  {'#':>2}  {'MusBeat':>8}  {'WavTime':>8}  {'Target':<6}  {'Detected':<8}  {'Pitch':<22}  {'Chord':<7}  Harm")
+        print(f"  {'─' * 82}")
+    elif show_wav:
         print(f"  {'#':>2}  {'MusTime':>8}  {'WavTime':>8}  {'Target':<6}  {'Detected':<8}  {'Pitch':<22}  {'Chord':<7}  Harm")
         print(f"  {'─' * 80}")
     else:
@@ -34,7 +37,11 @@ def _print_per_note(results, time_offset=0.0):
         pitch    = r["pitch_status"] + cents
         chord    = r.get("current_chord") or "—"
         hclass   = r.get("harmonic_class") or "—"
-        if show_wav:
+        if beat_unit:
+            wav_t   = r.get("audio_time", 0.0)
+            mus_val = r["target_time"]   # stored as beat number
+            print(f"  {i + 1:>2}  {mus_val:>7.1f}b  {wav_t:>7.3f}s  {r['target_note']:<6}  {detected:<8}  {pitch:<22}  {chord:<7}  {hclass}")
+        elif show_wav:
             wav_t = r.get("audio_time", r["target_time"] + time_offset)
             print(f"  {i + 1:>2}  {r['target_time']:>7.3f}s  {wav_t:>7.3f}s  {r['target_note']:<6}  {detected:<8}  {pitch:<22}  {chord:<7}  {hclass}")
         else:
@@ -178,11 +185,29 @@ def _parse_args():
         help="Shift every target time by SECONDS before analysis "
              "(use count-in duration when WAV was recorded with play_and_record_exercise.py)",
     )
+    parser.add_argument(
+        "--target-time-unit",
+        choices=["seconds", "beats"],
+        default="seconds",
+        metavar="{seconds,beats}",
+        help="Unit of the 'time' field in the target JSON (default: seconds)",
+    )
+    parser.add_argument(
+        "--bpm",
+        type=float,
+        metavar="BPM",
+        help="Tempo in beats per minute — required when --target-time-unit=beats",
+    )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
+
+    beat_unit = args.target_time_unit == "beats"
+    if beat_unit and args.bpm is None:
+        sys.exit("error: --bpm is required when --target-time-unit=beats")
+
     wav_path    = Path(args.wav)
     target_path = Path(args.targets)
 
@@ -197,6 +222,10 @@ def main():
     if args.time_offset:
         print(f"Offset:    {args.time_offset:+.3f}s")
 
+    if beat_unit:
+        beat_s = 60.0 / args.bpm
+        print(f"Tempo:     {args.bpm} BPM  ({beat_s:.4f}s/beat)")
+
     progression = []
     if args.progression:
         with open(args.progression, encoding="utf-8") as fh:
@@ -207,28 +236,32 @@ def main():
     targets = load_targets(target_path)
     print(f"Audio:     {len(audio) / SAMPLE_RATE:.2f}s  |  {len(targets)} targets")
 
-    # Build a parallel list with times shifted for audio window placement.
-    # The original targets list is kept intact for chord lookup.
     time_offset = args.time_offset
-    if time_offset:
+
+    if beat_unit:
+        # Convert beat times to seconds for audio window placement, keep originals for chord lookup.
+        beat_s = 60.0 / args.bpm
+        audio_targets = [
+            {**t, "time": time_offset + t["time"] * beat_s}
+            for t in targets
+        ]
+    elif time_offset:
         audio_targets = [{**t, "time": t["time"] + time_offset} for t in targets]
     else:
         audio_targets = targets
 
     results = [analyze_target(i, audio_targets, audio, input_latency_ms) for i in range(len(targets))]
 
-    if time_offset:
-        # analyze_target stored the audio (shifted) time in result["target_time"].
-        # Swap it: keep audio_time for reporting, restore target_time to musical time
-        # so annotate_harmony looks up the correct chord.
+    # Restore musical time for chord lookup and reporting; stash WAV position in audio_time.
+    if beat_unit or time_offset:
         for i, r in enumerate(results):
-            r["audio_time"]   = r["target_time"]       # shifted — where in the WAV we looked
-            r["target_time"]  = targets[i]["time"]     # original musical time for chord lookup
+            r["audio_time"]  = r["target_time"]    # seconds — where in the WAV we looked
+            r["target_time"] = targets[i]["time"]  # original value (beats or seconds)
 
     for r in results:
         annotate_harmony(r, progression)
 
-    _print_per_note(results, time_offset)
+    _print_per_note(results, time_offset, beat_unit)
     _print_summary(results)
 
 
