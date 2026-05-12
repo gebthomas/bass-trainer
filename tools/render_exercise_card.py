@@ -86,6 +86,9 @@ _CHROMATIC_LABELS: dict[int, str] = {
 _NOTE_RE  = re.compile(r"^([A-G][#b]?)")
 _CHORD_RE = re.compile(r"^([A-G][#b]?)(maj7|m7|7)$")
 
+_SUPER_FINGER: dict[int, str] = {0: "⁰", 1: "¹", 2: "²", 4: "⁴"}
+_POS_COL_W = 4   # chars reserved for Simandl position indicator
+
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
@@ -148,15 +151,32 @@ _CHORD_COL_W = 8   # visible characters reserved for the chord name column
 _DEG_COL_W   = 4   # visible characters per degree cell
 
 
-def _degree_cell(deg: str, string_name: str, use_color: bool, style: str = "background") -> str:
-    """Return a colour-coded, fixed-width degree cell string.
+def _degree_cell(
+    deg: str,
+    string_name: str,
+    use_color: bool,
+    style: str = "background",
+    finger: int | None = None,
+    show_finger: bool = False,
+    pos_label: str = "",
+    show_pos: bool = False,
+) -> str:
+    """Return a colour-coded degree cell, optionally prefixed by a position column.
 
-    Background style colors the full cell width (text + padding) so adjacent
-    cells form solid colored blocks.  Foreground style colors text only.
+    pos_label is the Roman numeral to display (e.g. "III"), or "" when the
+    position has not changed.  When show_pos is True the position column is
+    always emitted (_POS_COL_W wide) so cells stay aligned.
     """
-    pad = " " * max(0, _DEG_COL_W - len(deg))
+    # Position prefix — always _POS_COL_W chars when enabled, uncolored.
+    pos_col = pos_label.ljust(_POS_COL_W) if show_pos else ""
+
+    # Degree label with optional superscript finger.
+    finger_str = _SUPER_FINGER.get(finger, "") if show_finger and finger is not None else ""
+    label = deg + finger_str
+    pad   = " " * max(0, _DEG_COL_W - len(label))
+
     if not use_color:
-        return deg + pad
+        return pos_col + label + pad
 
     s = string_name.upper()
     is_root = deg == "R"
@@ -164,43 +184,62 @@ def _degree_cell(deg: str, string_name: str, use_color: bool, style: str = "back
     if style == "background":
         bg, fg = _BG_STRING.get(s, ("", ""))
         if not bg:
-            return deg + pad
+            return pos_col + label + pad
         bold_on  = _BOLD if is_root else ""
-        bold_off = _NORM if is_root else ""   # _NORM drops bold but keeps bg/fg colors
-        return f"{bg}{fg}{bold_on}{deg}{bold_off}{pad}{_RESET}"
+        bold_off = _NORM if is_root else ""
+        return pos_col + f"{bg}{fg}{bold_on}{label}{bold_off}{pad}{_RESET}"
     else:  # foreground
         fg = _FG_STRING.get(s, "")
         if not fg:
-            return deg + pad
+            return pos_col + label + pad
         bold = _BOLD if is_root else ""
-        return f"{fg}{bold}{deg}{_RESET}{pad}"
+        return pos_col + f"{fg}{bold}{label}{_RESET}{pad}"
 
 
 def render_card(
     groups: list[tuple[str, list[dict]]],
     use_color: bool = True,
     style: str = "background",
+    show_fingers: bool = True,
+    show_positions: bool = True,
 ) -> list[str]:
     """Return display lines, one per chord/measure group.
 
-    Format:
-        Dm7     | R   ♭3  5   ♭7  |
-        G7      | 3   R   ♭7  5   |
-        Cmaj7   | 3   5   7   5   |
+    Format (with fingers + positions):
+        Dm7     |I   R   ♭3⁴ I   5   ♭7⁴|
+        G7      |I   R²  III ♭7⁴ ♭7¹ I   R  |
+        Cmaj7   |I   3²  III 5⁴  I   7²  5⁴ |
     """
     lines = []
+    prev_position: str | None = None
+
     for chord, targets in groups:
-        cells = "".join(
-            _degree_cell(
+        cells = []
+        for t in targets:
+            position = t.get("position")
+
+            if show_positions and position and position != prev_position:
+                pos_label = position
+            else:
+                pos_label = ""
+
+            if position:
+                prev_position = position
+
+            cells.append(_degree_cell(
                 degree_label(t.get("note", "?"), chord),
                 t.get("string", ""),
                 use_color,
                 style,
-            )
-            for t in targets
-        )
+                finger=t.get("finger"),
+                show_finger=show_fingers,
+                pos_label=pos_label,
+                show_pos=show_positions,
+            ))
+
         chord_col = chord.ljust(_CHORD_COL_W)
-        lines.append(f"{chord_col}| {cells}|")
+        lines.append(f"{chord_col}| {''.join(cells)}|")
+
     return lines
 
 
@@ -217,7 +256,8 @@ def render_legend(use_color: bool = True, style: str = "background") -> str:
         else:
             fg = _FG_STRING.get(s, "")
             parts.append(f"{fg}{s}{_RESET} = {desc}")
-    return "Strings:  " + "   ".join(parts)
+    finger_note = "  Fingers: ⁰open  ¹index  ²middle  ⁴pinky"
+    return "Strings:  " + "   ".join(parts) + "\n" + finger_note
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -238,6 +278,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--color-style", choices=["foreground", "background"],
                    default="background", metavar="{foreground,background}",
                    help="Color style: background (default) or foreground")
+    p.add_argument("--show-fingers", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Show Simandl finger numbers as superscripts (default: on)")
+    p.add_argument("--show-positions", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Show position markers when position changes (default: on)")
     return p.parse_args()
 
 
@@ -251,7 +297,9 @@ def main() -> None:
         progression = json.load(fh)
 
     groups = group_targets_by_measure(targets, progression, args.beats_per_measure)
-    lines  = render_card(groups, use_color, style)
+    lines  = render_card(groups, use_color, style,
+                         show_fingers=args.show_fingers,
+                         show_positions=args.show_positions)
 
     print()
     for line in lines:

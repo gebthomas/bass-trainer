@@ -6,7 +6,10 @@
       "Bash(python tools/render_exercise_card.py tests/targets/jazz/ii_v_i_low_position_quarters.json --progression tests/progressions/ii_v_i_C_slow.json --no-color)",
       "Bash(python3 tools/render_exercise_card.py tests/targets/jazz/ii_v_i_low_position_quarters.json --progression tests/progressions/ii_v_i_C_slow.json --no-color)",
       "Bash(python3 tools/run_jazz_exercise.py --help)",
-      "Bash(python3 tools/render_exercise_card.py tests/targets/jazz/ii_v_i_low_position_quarters.json --progression tests/progressions/ii_v_i_C_slow.json)"
+      "Bash(python3 tools/render_exercise_card.py tests/targets/jazz/ii_v_i_low_position_quarters.json --progression tests/progressions/ii_v_i_C_slow.json)",
+      "Bash(python tools/render_exercise_card.py --help)",
+      "Bash(python3 tools/render_exercise_card.py --help)",
+      "Bash(python3 tools/render_exercise_card.py tests/targets/jazz/ii_v_i_low_position_quarters.json --progression tests/progressions/ii_v_i_C.json --no-color)"
     ]
   }
 }
