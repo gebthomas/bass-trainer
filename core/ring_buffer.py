@@ -49,6 +49,12 @@ class RingBuffer:
             return
 
         self._total_written += n
+
+        # Only the most recent _capacity samples fit; discard older excess.
+        if n > self._capacity:
+            data = data[-self._capacity:]
+            n = self._capacity
+
         write_start = (self._total_written - n) % self._capacity
 
         end = write_start + n
