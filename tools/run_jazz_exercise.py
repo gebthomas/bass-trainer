@@ -62,10 +62,29 @@ def _practice_suggestion(n_total, n_ok, n_pitch_err, n_missed, n_out, n_classifi
         )
 
     if n_pitch_err > 0:
-        notes_str = ", ".join(f"{e['target']} ({e['cents']:+.0f}c)" for e in pitch_errors)
-        suggestions.append(
-            f"Intonation issues on: {notes_str}. Slow down and listen for the centre of the pitch."
-        )
+        # Partition by cents magnitude — large deviations are likely detection artefacts,
+        # not intonation problems the player should act on.
+        intonation  = [e for e in pitch_errors if abs(e["cents"]) < 300]
+        wrong_or_cx = [e for e in pitch_errors if 300 <= abs(e["cents"]) < 900]
+        artefacts   = [e for e in pitch_errors if abs(e["cents"]) >= 900]
+
+        if intonation:
+            notes_str = ", ".join(f"{e['target']} ({e['cents']:+.0f}c)" for e in intonation)
+            suggestions.append(
+                f"Intonation issues on: {notes_str}. Slow down and listen for the centre of the pitch."
+            )
+
+        if wrong_or_cx:
+            notes_str = ", ".join(f"{e['target']} ({e['cents']:+.0f}c)" for e in wrong_or_cx)
+            suggestions.append(
+                f"Wrong note or contaminated window: {notes_str}. Check fingering and note choice."
+            )
+
+        if artefacts:
+            notes_str = ", ".join(f"{e['target']} ({e['cents']:+.0f}c)" for e in artefacts)
+            suggestions.append(
+                f"Possible octave/subharmonic detection error (not an intonation issue): {notes_str}."
+            )
 
     if n_classified > 0 and n_out > 0:
         out_pct = n_out / n_classified * 100
