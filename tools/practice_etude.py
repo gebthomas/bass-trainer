@@ -30,9 +30,10 @@ _PY       = sys.executable
 
 # ── Sub-step functions ────────────────────────────────────────────────────────
 
-def _render_card(targets: str, progression: str) -> None:
+def _render_card(targets: str, progression: str, card_mode: str = "full") -> None:
     subprocess.run(
-        [_PY, str(_RENDERER), targets, "--progression", progression],
+        [_PY, str(_RENDERER), targets, "--progression", progression,
+         "--card-mode", card_mode],
         check=False,
     )
 
@@ -190,6 +191,9 @@ def _parse_args() -> argparse.Namespace:
     # pass-through: analyzer calibration
     p.add_argument("--apply-calibration", action="store_true",
                    help="Apply input_latency_ms from audio_calibration.json (analyzer only)")
+    p.add_argument("--card-mode", choices=["full", "practice", "memory"],
+                   default="full", metavar="{full,practice,memory}",
+                   help="Exercise card detail level (default: full)")
     return p.parse_args()
 
 
@@ -203,7 +207,7 @@ def main() -> None:
     Path(args.output_prefix).parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Render exercise card
-    _render_card(args.targets, args.progression)
+    _render_card(args.targets, args.progression, card_mode=args.card_mode)
 
     # 2. Prompt
     try:

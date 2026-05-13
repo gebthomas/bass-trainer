@@ -160,6 +160,7 @@ def _degree_cell(
     show_finger: bool = False,
     pos_label: str = "",
     show_pos: bool = False,
+    show_degree: bool = True,
 ) -> str:
     """Return a colour-coded degree cell, optionally prefixed by a position column.
 
@@ -169,6 +170,9 @@ def _degree_cell(
     """
     # Position prefix — always _POS_COL_W chars when enabled, uncolored.
     pos_col = pos_label.ljust(_POS_COL_W) if show_pos else ""
+
+    if not show_degree:
+        return pos_col + " " * _DEG_COL_W
 
     # Degree label with optional superscript finger.
     finger_str = _SUPER_FINGER.get(finger, "") if show_finger and finger is not None else ""
@@ -202,6 +206,7 @@ def render_card(
     style: str = "background",
     show_fingers: bool = True,
     show_positions: bool = True,
+    show_degrees: bool = True,
 ) -> list[str]:
     """Return display lines, one per chord/measure group.
 
@@ -235,6 +240,7 @@ def render_card(
                 show_finger=show_fingers,
                 pos_label=pos_label,
                 show_pos=show_positions,
+                show_degree=show_degrees,
             ))
 
         chord_col = chord.ljust(_CHORD_COL_W)
@@ -284,13 +290,37 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--show-positions", action=argparse.BooleanOptionalAction,
                    default=True,
                    help="Show position markers when position changes (default: on)")
+    p.add_argument("--card-mode", choices=["full", "practice", "memory"],
+                   default="full", metavar="{full,practice,memory}",
+                   help="full: all aids shown (default); practice: no fingers/positions/legend; "
+                        "memory: chords only, all aids hidden")
     return p.parse_args()
 
 
 def main() -> None:
-    args      = _parse_args()
-    use_color = not args.no_color
-    style     = args.color_style
+    args = _parse_args()
+    mode = args.card_mode
+
+    if mode == "full":
+        show_degrees   = True
+        show_fingers   = args.show_fingers
+        show_positions = args.show_positions
+        use_color      = not args.no_color
+        show_legend    = True
+    elif mode == "practice":
+        show_degrees   = True
+        show_fingers   = False
+        show_positions = False
+        use_color      = not args.no_color
+        show_legend    = False
+    else:  # memory
+        show_degrees   = False
+        show_fingers   = False
+        show_positions = False
+        use_color      = False
+        show_legend    = False
+
+    style = args.color_style
 
     targets = load_targets(args.targets)
     with open(args.progression, encoding="utf-8") as fh:
@@ -298,15 +328,17 @@ def main() -> None:
 
     groups = group_targets_by_measure(targets, progression, args.beats_per_measure)
     lines  = render_card(groups, use_color, style,
-                         show_fingers=args.show_fingers,
-                         show_positions=args.show_positions)
+                         show_fingers=show_fingers,
+                         show_positions=show_positions,
+                         show_degrees=show_degrees)
 
     print()
     for line in lines:
         print(" ", line)
     print()
-    print(" ", render_legend(use_color, style))
-    print()
+    if show_legend:
+        print(" ", render_legend(use_color, style))
+        print()
 
 
 if __name__ == "__main__":
