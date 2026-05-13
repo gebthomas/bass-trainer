@@ -11,3 +11,6 @@ tests/audio/practice_tracks/*.wav
 tests/real_audio/jazz/session_*.wav
 tests/real_audio/jazz/sync_test*.wav
 tests/real_audio/jazz/*take*.wav
+tests/real_audio/jazz/practice_*.wav
+!tests/real_audio/jazz/practice_reference_bass.wav
+!tests/real_audio/jazz/practice_reference_stereo.wav
