@@ -12,7 +12,7 @@ Run from the project root:
     python scripts/live_feedback_demo.py --no-click
 
 Output format:
-    [t_now s] beat N  HIT/MISS  rms=...  peak=...  onset=...
+    [t_now s] beat N  SEVERITY  ±XX ms  rms=...  peak=...  message
 """
 
 import argparse
@@ -24,7 +24,6 @@ import sounddevice as sd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.feedback_scoring import score_timing
 from core.live_pipeline import process_realtime_audio
 from core.practice_session import PracticeSession
 
@@ -173,15 +172,17 @@ def _play_count_in(bpm: float, count_in_beats: int, sample_rate: int) -> None:
 # ── Feedback formatting ───────────────────────────────────────────────────────
 
 def _format_event(event: dict, t_now: float) -> str:
-    idx   = event["target_index"]
-    ev    = event["evaluation"]
-    score = score_timing(ev, target_index=idx)
-    status = score["status"].upper()
-    ms_str = f"{score['offset_ms']:+.0f} ms" if score["offset_ms"] is not None else "-- ms"
-    return (
-        f"[{t_now:5.2f}s] beat {idx}  {status:<7}  {ms_str:>7}"
+    idx    = event["target_index"]
+    ev     = event["evaluation"]
+    sev    = event["severity"].upper()
+    t_err  = event["timing_error_s"]
+    ms_str = f"{t_err * 1000:+.0f} ms" if t_err is not None else "-- ms"
+    msg    = "  ".join(event["messages"]) if event["messages"] else ""
+    line   = (
+        f"[{t_now:5.2f}s] beat {idx}  {sev:<5}  {ms_str:>7}"
         f"  rms={ev['rms']:.4f}  peak={ev['peak']:.4f}"
     )
+    return line + (f"  {msg}" if msg else "")
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────

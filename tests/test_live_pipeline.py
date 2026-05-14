@@ -222,3 +222,90 @@ def test_empty_audio_all_eval_keys_present():
 def test_empty_target_list_returns_empty():
     s = PracticeSession([], _BPM, _COUNT_IN, _SR)
     assert process_realtime_audio(_AUDIO, 1_000_000, s) == []
+
+
+# ── Structured event fields ───────────────────────────────────────────────────
+
+_EVENT_KEYS = ("target_index", "evaluation", "severity", "timing_error_s",
+               "messages", "expected_note", "detected_note",
+               "pitch_error_cents", "confidence")
+
+
+def test_event_has_all_structured_keys():
+    event = _run(_T[0])[0]
+    for k in _EVENT_KEYS:
+        assert k in event, f"missing key: {k!r}"
+
+
+def test_silent_audio_severity_is_miss():
+    event = _run(_T[0])[0]
+    assert event["severity"] == "miss"
+
+
+def test_silent_audio_timing_error_is_none():
+    event = _run(_T[0])[0]
+    assert event["timing_error_s"] is None
+
+
+def test_silent_audio_detected_note_is_none():
+    event = _run(_T[0])[0]
+    assert event["detected_note"] is None
+
+
+def test_silent_audio_messages_not_empty():
+    event = _run(_T[0])[0]
+    assert len(event["messages"]) > 0
+
+
+def test_expected_note_from_target():
+    # _TARGETS[0] has note "D2"
+    event = _run(_T[0])[0]
+    assert event["expected_note"] == "D2"
+
+
+def test_onset_detected_note_is_sentinel():
+    # Spike exactly at the beat → onset found → detected_note == "?"
+    # BPM=120, count_in=4: target[0] beat = 2.0 s → sample 96000
+    audio = np.zeros(200_000)
+    audio[96000] = 0.5
+    event = process_realtime_audio(audio, _T[0], _session())[0]
+    assert event["detected_note"] == "?"
+
+
+def test_onset_at_beat_timing_error_near_zero():
+    # Spike exactly at the target beat → timing_error_s ≈ 0.
+    audio = np.zeros(200_000)
+    audio[96000] = 0.5
+    event = process_realtime_audio(audio, _T[0], _session())[0]
+    assert event["timing_error_s"] is not None
+    assert abs(event["timing_error_s"]) < 0.005  # within 5 ms
+
+
+def test_onset_early_gives_negative_timing_error():
+    # Spike 20 ms before the beat → still inside the 30 ms pre_roll window → timing_error_s < 0.
+    beat_sample = 96000
+    early_sample = beat_sample - int(0.020 * _SR)
+    audio = np.zeros(200_000)
+    audio[early_sample] = 0.5
+    event = process_realtime_audio(audio, _T[0], _session())[0]
+    assert event["timing_error_s"] is not None
+    assert event["timing_error_s"] < 0
+
+
+def test_onset_late_gives_positive_timing_error():
+    # Spike 40 ms after the beat → timing_error_s ≈ +0.04.
+    beat_sample = 96000
+    late_sample = beat_sample + int(0.040 * _SR)
+    audio = np.zeros(200_000)
+    audio[late_sample] = 0.5
+    event = process_realtime_audio(audio, _T[0], _session())[0]
+    assert event["timing_error_s"] is not None
+    assert event["timing_error_s"] > 0
+
+
+def test_on_time_onset_severity_is_good():
+    # Spike exactly at the beat → within 50 ms tolerance → good.
+    audio = np.zeros(200_000)
+    audio[96000] = 0.5
+    event = process_realtime_audio(audio, _T[0], _session())[0]
+    assert event["severity"] == "good"
