@@ -10,9 +10,15 @@ Run from the project root:
     python scripts/live_feedback_demo.py --device 2 --samplerate 44100
     python scripts/live_feedback_demo.py --level-check
     python scripts/live_feedback_demo.py --no-click
+    python scripts/live_feedback_demo.py --adaptive-timing
+    python scripts/live_feedback_demo.py --adaptive-timing --adaptive-window-shift 0.3
+    python scripts/live_feedback_demo.py --adaptive-timing --max-window-shift-beats 0.25
 
-Output format:
+Output format (fixed-grid):
     [t_now s] beat N  SEVERITY  ±XX ms  rms=...  peak=...  message
+
+Output format (adaptive timing):
+    [t_now s] beat N  SEVERITY  ±XX ms  rms=...  peak=...  message  [bpm=61.2 win=−5ms]
 """
 
 import argparse
@@ -26,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.live_pipeline import process_realtime_audio
 from core.practice_session import PracticeSession
+from core.tempo_tracker import TempoTracker
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +189,13 @@ def _format_event(event: dict, t_now: float) -> str:
         f"[{t_now:5.2f}s] beat {idx}  {sev:<5}  {ms_str:>7}"
         f"  rms={ev['rms']:.4f}  peak={ev['peak']:.4f}"
     )
-    return line + (f"  {msg}" if msg else "")
+    if msg:
+        line += f"  {msg}"
+    if "timing_grid" in event:
+        bpm    = event["current_bpm"]
+        win_ms = event["window_shift_s"] * 1000
+        line  += f"  [bpm={bpm:.1f} win={win_ms:+.0f}ms]"
+    return line
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -204,6 +217,22 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-click", action="store_true",
         help="Disable audible count-in clicks",
+    )
+    p.add_argument(
+        "--adaptive-timing", action="store_true",
+        help="Enable adaptive tempo tracking (TempoTracker-adjusted windows and scoring)",
+    )
+    p.add_argument(
+        "--adaptive-window-shift", type=float, default=0.5,
+        metavar="FRAC",
+        help="Fraction of (adjusted−nominal) gap to shift the extraction window "
+             "(0=none, 1=full; default 0.5).  Only used with --adaptive-timing.",
+    )
+    p.add_argument(
+        "--max-window-shift-beats", type=float, default=0.30,
+        metavar="BEATS",
+        help="Maximum window shift as a fraction of one beat (default 0.30). "
+             "Only used with --adaptive-timing.",
     )
     return p.parse_args()
 
@@ -238,9 +267,22 @@ def main() -> None:
     buffer      = np.zeros(max_samples, dtype=np.float64)
     write_pos   = 0
 
+    # ── Adaptive timing setup ─────────────────────────────────────────────────
+
+    tracker            = TempoTracker(float(BPM)) if args.adaptive_timing else None
+    max_window_shift_s = args.max_window_shift_beats * beat_s if args.adaptive_timing else None
+
+    # ── Header ────────────────────────────────────────────────────────────────
+
     click_label = "  (clicks disabled)" if args.no_click else ""
     print(f"BPM {BPM}  |  count-in {COUNT_IN} beats  |  {len(TARGETS)} targets{click_label}")
     print(f"Count-in ends at {count_in_s:.1f}s — last target at {last_beat_s:.1f}s")
+    if args.adaptive_timing:
+        print(
+            f"Adaptive timing ON  "
+            f"shift={args.adaptive_window_shift:.2f}  "
+            f"max={args.max_window_shift_beats:.2f} beats"
+        )
     print("Ctrl-C to stop early.\n")
 
     try:
@@ -263,7 +305,12 @@ def main() -> None:
                 write_pos += n
 
                 t_now = write_pos / sample_rate
-                for event in process_realtime_audio(buffer[:write_pos], write_pos, session):
+                for event in process_realtime_audio(
+                    buffer[:write_pos], write_pos, session,
+                    tempo_tracker=tracker,
+                    adaptive_window_shift=args.adaptive_window_shift,
+                    max_window_shift_s=max_window_shift_s,
+                ):
                     print(_format_event(event, t_now))
 
     except KeyboardInterrupt:

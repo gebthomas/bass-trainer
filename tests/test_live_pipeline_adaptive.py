@@ -58,6 +58,7 @@ _FIXED_KEYS = frozenset({
 # Extra keys that appear only in adaptive mode
 _ADAPTIVE_KEYS = frozenset({
     "timing_grid", "nominal_target_time_s", "adjusted_target_time_s",
+    "window_center_time_s", "window_shift_s",
     "tempo_ratio", "current_bpm", "tempo_tracker_confidence",
 })
 
