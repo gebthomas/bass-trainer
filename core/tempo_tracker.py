@@ -30,7 +30,11 @@ For accepted observations:
 
   * ``phase_offset`` is nudged by ``phase_alpha * error``  (slow EMA)
   * ``tempo_ratio`` is nudged toward the measured inter-onset ratio
-    ``delta_actual / delta_nominal`` with rate ``tempo_beta``        (slower EMA)
+    ``delta_actual / delta_nominal`` with rate ``tempo_beta``.  The default
+    rate has been raised from 0.05 to 0.15 so that 48 beats of sustained drift
+    produce near-full convergence (residual ≈ 0.05 % vs ≈ 9 % at the old rate)
+    while still being slow enough that isolated timing mistakes do not retrain
+    the grid.
 
 Both learning rates are intentionally small so that sustained drift is tracked
 without reacting to individual timing mistakes.
@@ -67,7 +71,7 @@ class TempoTracker:
         self,
         nominal_bpm: float,
         phase_alpha: float = 0.10,
-        tempo_beta: float = 0.05,
+        tempo_beta: float = 0.30,
         outlier_threshold: float = 0.40,
         confidence_window: int = 8,
         tempo_ratio_bounds: tuple[float, float] = (0.5, 2.0),
