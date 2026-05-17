@@ -11,7 +11,8 @@
       "Bash(python3 tools/render_exercise_card.py --help)",
       "Bash(python3 tools/render_exercise_card.py tests/targets/jazz/ii_v_i_low_position_quarters.json --progression tests/progressions/ii_v_i_C.json --no-color)",
       "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario missed --beats 12 --missed-beats 3,7)",
-      "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario outlier_late --beats 10 --outlier-offset-ms 350 --outlier-beat 5)"
+      "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario outlier_late --beats 10 --outlier-offset-ms 350 --outlier-beat 5)",
+      "Bash(.venv/bin/python -m pytest tests/test_replay_tempo_tracking.py -v)"
     ]
   }
 }
