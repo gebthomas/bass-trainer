@@ -183,3 +183,13 @@ class TempoTracker:
     def has_anchor(self) -> bool:
         """True once the first observation has been recorded."""
         return self._anchor_nominal is not None
+
+    @property
+    def outlier_limit_s(self) -> float:
+        """Absolute error (seconds) beyond which observations are treated as outliers."""
+        return self._outlier_limit_s
+
+    @property
+    def nominal_beat_s(self) -> float:
+        """Nominal beat duration in seconds (60 / nominal_bpm)."""
+        return self._nominal_beat_s

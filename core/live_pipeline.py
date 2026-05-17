@@ -16,6 +16,10 @@ from core.tempo_tracker import TempoTracker
 # Fraction of one beat used as the default maximum window shift.
 _DEFAULT_MAX_SHIFT_FRAC = 0.30
 
+# Default extraction-window margins (seconds before / after the window center).
+_DEFAULT_PRE_ROLL_S  = 0.03
+_DEFAULT_POST_ROLL_S = 0.10
+
 
 def process_realtime_audio(
     audio: np.ndarray,
@@ -24,6 +28,8 @@ def process_realtime_audio(
     tempo_tracker: TempoTracker | None = None,
     adaptive_window_shift: float = 0.5,
     max_window_shift_s: float | None = None,
+    adaptive_search_margin_beats: float = 0.15,
+    max_adaptive_search_margin_beats: float = 0.25,
 ) -> list[dict]:
     """Advance session state and evaluate any newly ready targets.
 
@@ -49,6 +55,15 @@ def process_realtime_audio(
                            ``0.30 × nominal_beat_duration``, approximately
                            30 % of one beat.  Only used when *tempo_tracker*
                            is provided.
+    adaptive_search_margin_beats : extra pre/post-roll margin added when
+                           adaptive timing is active and tracker confidence is
+                           low.  At confidence=0 the full margin is applied;
+                           at confidence=1 no extra margin is added.  Default
+                           0.15 beats (~75 ms at 120 BPM).  Only used when
+                           *tempo_tracker* is provided.
+    max_adaptive_search_margin_beats : hard cap on the extra margin in beats.
+                           Prevents runaway window widening even at zero
+                           confidence.  Default 0.25 beats.
 
     Returns
     -------
@@ -77,9 +92,12 @@ def process_realtime_audio(
                 "adjusted_target_time_s":    float | None,
                 "window_center_time_s":      float,
                 "window_shift_s":            float,
+                "search_pre_roll_s":         float,   # actual pre-roll used
+                "search_post_roll_s":        float,   # actual post-roll used
+                "tracker_confidence":        float,   # 0–1 stability score
                 "tempo_ratio":               float,
-                "current_bpm":               float,
-                "tempo_tracker_confidence":  float,
+                "current_bpm":              float,
+                "tempo_tracker_confidence":  float,   # same value; kept for back-compat
             }
 
         Empty list if no targets became ready this call.
@@ -102,9 +120,16 @@ def process_realtime_audio(
             window_center_time_s, window_shift_s = _compute_adaptive_window(
                 nominal_beat_time, tempo_tracker, adaptive_window_shift, _max_shift,
             )
+            confidence = tempo_tracker.confidence()
+            pre_roll_s, post_roll_s = _compute_search_rolls(
+                confidence, beat_s,
+                adaptive_search_margin_beats, max_adaptive_search_margin_beats,
+            )
         else:
             window_center_time_s = nominal_beat_time
             window_shift_s = 0.0
+            pre_roll_s  = _DEFAULT_PRE_ROLL_S
+            post_roll_s = _DEFAULT_POST_ROLL_S
 
         window = extract_target_window(
             audio,
@@ -112,6 +137,8 @@ def process_realtime_audio(
             session.bpm,
             session.count_in_beats,
             session.sample_rate,
+            pre_roll_s=pre_roll_s,
+            post_roll_s=post_roll_s,
             center_time_s=window_center_time_s if tempo_tracker is not None else None,
         )
         evaluation = evaluate_window(window["audio"], session.sample_rate)
@@ -136,9 +163,12 @@ def process_realtime_audio(
             event["adjusted_target_time_s"]   = result["_adjusted_beat_time_s"]
             event["window_center_time_s"]     = window_center_time_s
             event["window_shift_s"]           = window_shift_s
+            event["search_pre_roll_s"]        = pre_roll_s
+            event["search_post_roll_s"]       = post_roll_s
+            event["tracker_confidence"]       = confidence   # pre-observe; explains window size
             event["tempo_ratio"]              = tempo_tracker.tempo_ratio
             event["current_bpm"]              = tempo_tracker.current_tempo_bpm()
-            event["tempo_tracker_confidence"] = tempo_tracker.confidence()
+            event["tempo_tracker_confidence"] = tempo_tracker.confidence()  # post-observe
 
         events.append(event)
 
@@ -161,6 +191,24 @@ def _compute_adaptive_window(
     raw_shift = shift_fraction * (adjusted - nominal_beat_time)
     clamped   = max(-max_shift_s, min(max_shift_s, raw_shift))
     return nominal_beat_time + clamped, clamped
+
+
+def _compute_search_rolls(
+    confidence: float,
+    beat_s: float,
+    adaptive_search_margin_beats: float,
+    max_adaptive_search_margin_beats: float,
+) -> tuple[float, float]:
+    """Return (pre_roll_s, post_roll_s) widened by a confidence-scaled margin.
+
+    At confidence=0 the full *adaptive_search_margin_beats* is added; at
+    confidence=1 the rolls fall back to the fixed-grid defaults.  The extra
+    margin is clamped to *max_adaptive_search_margin_beats*.
+    """
+    extra_beats = adaptive_search_margin_beats * (1.0 - confidence)
+    extra_beats = min(extra_beats, max_adaptive_search_margin_beats)
+    extra_s = extra_beats * beat_s
+    return _DEFAULT_PRE_ROLL_S + extra_s, _DEFAULT_POST_ROLL_S + extra_s
 
 
 def _evaluation_to_result(
