@@ -34,7 +34,9 @@
       "Bash(python -m pytest tests/test_session_engine_replay.py -v)",
       "Bash(python3 -m pytest tests/test_session_engine_replay.py -v)",
       "Bash(python3.11 -m pytest tests/test_session_engine_replay.py -v)",
-      "Bash(python3.11 scripts/replay_session.py --file tests/fixtures/sessions/four_quarter_120bpm_one_miss.json --verbose)"
+      "Bash(python3.11 scripts/replay_session.py --file tests/fixtures/sessions/four_quarter_120bpm_one_miss.json --verbose)",
+      "Bash(python3.11 -m pytest tests/test_exercise.py -v)",
+      "Bash(python3.11 -m pytest --tb=no -q)"
     ]
   }
 }
