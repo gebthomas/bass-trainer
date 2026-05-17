@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "bpm": 100.0,
+  "count_in_beats": 0,
+  "targets": [
+    {"time": 1, "note": "?"},
+    {"time": 2, "note": "?"}
+  ],
+  "engine": {},
+  "tracker": {},
+  "onsets": [0.680, 1.290],
+  "expected": {
+    "total": 2,
+    "hits": 2,
+    "misses": 0,
+    "good": 0,
+    "warn": 2
+  }
+}

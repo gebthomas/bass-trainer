@@ -30,7 +30,11 @@
       "Bash(pytest tests/test_session_engine.py tests/test_session_engine_sequences.py --tb=no -q)",
       "Bash(python -m pytest tests/test_onset_adapter.py -v)",
       "Bash(python3 -m pytest tests/test_onset_adapter.py -v)",
-      "Bash(pytest tests/test_onset_adapter.py -v)"
+      "Bash(pytest tests/test_onset_adapter.py -v)",
+      "Bash(python -m pytest tests/test_session_engine_replay.py -v)",
+      "Bash(python3 -m pytest tests/test_session_engine_replay.py -v)",
+      "Bash(python3.11 -m pytest tests/test_session_engine_replay.py -v)",
+      "Bash(python3.11 scripts/replay_session.py --file tests/fixtures/sessions/four_quarter_120bpm_one_miss.json --verbose)"
     ]
   }
 }
