@@ -82,19 +82,29 @@ class SessionEngine:
 
         Notes
         -----
-        Matching rule: the pending target whose nominal time is closest to
+        Matching rule: the pending target whose reference time is closest to
         *onset_time_s* and within ``match_window_s`` is selected.  Ties
-        (equidistant onsets) resolve to the lower target index.  If the
-        tracker is provided, ``observe()`` is called only for matched onsets.
+        resolve to the lower target index.
+
+        When a tracker is present and anchored, the reference time is
+        ``tracker.adjusted_target_time(nominal_i)`` — the tracker's prediction
+        of where the player's beat actually falls.  Before the anchor is set
+        (first beat) or when no tracker is provided, the reference falls back
+        to the nominal grid time.  This lets the match window follow the
+        player's actual tempo under large drift while keeping ``timing_error_s``
+        always relative to the nominal grid (musical feedback).
         """
         best_idx   = None
         best_delta = float("inf")
 
+        use_adjusted = self.tracker is not None and self.tracker.has_anchor
+
         for i in range(len(self.targets)):
             if i in self.evaluated_indices:
                 continue
-            nom   = self._nominal_s(i)
-            delta = abs(onset_time_s - nom)
+            nom = self._nominal_s(i)
+            ref = self.tracker.adjusted_target_time(nom) if use_adjusted else nom
+            delta = abs(onset_time_s - ref)
             if delta <= self.match_window_s and delta < best_delta:
                 best_delta = delta
                 best_idx   = i

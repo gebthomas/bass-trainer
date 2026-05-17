@@ -23,7 +23,11 @@
       "Bash(pytest tests/test_session_engine.py -v)",
       "Bash(python3.11 -m pytest tests/ --ignore=tests/test_pitch_reference_regression.py --collect-only -q)",
       "Bash(pytest -v)",
-      "Bash(pytest)"
+      "Bash(pytest)",
+      "Bash(pytest tests/test_session_engine_sequences.py -v)",
+      "Bash(pytest tests/test_session_engine.py tests/test_session_engine_sequences.py -v)",
+      "Bash(python3.11 -c ' *)",
+      "Bash(pytest tests/test_session_engine.py tests/test_session_engine_sequences.py --tb=no -q)"
     ]
   }
 }
