@@ -14,7 +14,9 @@
       "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario outlier_late --beats 10 --outlier-offset-ms 350 --outlier-beat 5)",
       "Bash(.venv/bin/python -m pytest tests/test_replay_tempo_tracking.py -v)",
       "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario accel --start-bpm 120 --end-bpm 132 --beats 48)",
-      "Bash(.venv/bin/python -m pytest tests/test_tempo_tracker_drift.py -v)"
+      "Bash(.venv/bin/python -m pytest tests/test_tempo_tracker_drift.py -v)",
+      "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario all --summary-only --beats 32)",
+      "Bash(.venv/bin/python -m pytest tests/test_replay_summary.py -v)"
     ]
   }
 }

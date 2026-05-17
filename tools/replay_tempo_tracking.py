@@ -12,6 +12,8 @@ Usage
     python tools/replay_tempo_tracking.py --scenario outlier_late --outlier-offset-ms 350
     python tools/replay_tempo_tracking.py --scenario missed --missed-beats 5,10,15
     python tools/replay_tempo_tracking.py --scenario all --csv /tmp/timing_report.csv
+    python tools/replay_tempo_tracking.py --scenario all --summary-only
+    python tools/replay_tempo_tracking.py --scenario fast --no-summary
 
 Scenarios
 ---------
@@ -179,18 +181,22 @@ def run_replay(
         nom = onset["nominal_time_s"]
         act = onset["actual_time_s"]
 
+        # Capture effective limit before any state change; used for summary.
+        effective_limit_ms = tracker.effective_outlier_limit() * 1000.0
+
         if act is None:
             # Missed beat — no observation, tracker unchanged.
             results.append({
-                "beat":                   onset["beat_index"],
-                "nominal_time_s":         nom,
-                "actual_onset_time_s":    None,
-                "adjusted_target_time_s": None,
-                "fixed_error_ms":         None,
-                "adaptive_error_ms":      None,
-                "estimated_bpm":          tracker.current_tempo_bpm(),
-                "confidence":             tracker.confidence(),
-                "status":                 "miss",
+                "beat":                      onset["beat_index"],
+                "nominal_time_s":            nom,
+                "actual_onset_time_s":       None,
+                "adjusted_target_time_s":    None,
+                "fixed_error_ms":            None,
+                "adaptive_error_ms":         None,
+                "estimated_bpm":             tracker.current_tempo_bpm(),
+                "confidence":                tracker.confidence(),
+                "status":                    "miss",
+                "effective_outlier_limit_ms": effective_limit_ms,
             })
             continue
 
@@ -212,15 +218,16 @@ def run_replay(
         tracker.observe(nom, act)
 
         results.append({
-            "beat":                   onset["beat_index"],
-            "nominal_time_s":         nom,
-            "actual_onset_time_s":    act,
-            "adjusted_target_time_s": adjusted,
-            "fixed_error_ms":         fixed_error_s * 1000.0,
-            "adaptive_error_ms":      raw_error_s * 1000.0,
-            "estimated_bpm":          tracker.current_tempo_bpm(),
-            "confidence":             tracker.confidence(),
-            "status":                 status,
+            "beat":                      onset["beat_index"],
+            "nominal_time_s":            nom,
+            "actual_onset_time_s":       act,
+            "adjusted_target_time_s":    adjusted,
+            "fixed_error_ms":            fixed_error_s * 1000.0,
+            "adaptive_error_ms":         raw_error_s * 1000.0,
+            "estimated_bpm":             tracker.current_tempo_bpm(),
+            "confidence":                tracker.confidence(),
+            "status":                    status,
+            "effective_outlier_limit_ms": effective_limit_ms,
         })
 
     return results
@@ -281,6 +288,130 @@ def export_csv(results: list[dict], path: str) -> None:
         writer.writeheader()
         for row in results:
             writer.writerow({k: ("" if row[k] is None else row[k]) for k in columns})
+
+
+# ── Summary helpers ──────────────────────────────────────────────────────────
+
+def summarize_results(results: list[dict]) -> dict:
+    """Compute aggregate statistics from a ``run_replay`` result list.
+
+    Returns a dict with the following keys:
+
+        accepted              : int    — beats with status "anchor" or "accept"
+        rejected              : int    — beats with status "reject"
+        missed                : int    — beats with status "miss"
+        final_bpm             : float
+        bpm_min               : float
+        bpm_max               : float
+        mean_abs_fixed_ms     : float | None  — over beats that have an onset
+        mean_abs_adapt_ms     : float | None
+        max_abs_adapt_ms      : float | None
+        adapt_improvement_ms  : float | None  — mean_abs_fixed − mean_abs_adapt
+        adapt_improvement_pct : float | None  — improvement as % of fixed mean
+        outlier_limit_min_ms  : float | None
+        outlier_limit_max_ms  : float | None
+    """
+    accepted = sum(1 for r in results if r["status"] in ("anchor", "accept"))
+    rejected = sum(1 for r in results if r["status"] == "reject")
+    missed   = sum(1 for r in results if r["status"] == "miss")
+
+    bpms      = [r["estimated_bpm"] for r in results]
+    final_bpm = bpms[-1] if bpms else 0.0
+    bpm_min   = min(bpms) if bpms else 0.0
+    bpm_max   = max(bpms) if bpms else 0.0
+
+    fixed_abs  = [abs(r["fixed_error_ms"])   for r in results if r["fixed_error_ms"]   is not None]
+    adapt_abs  = [abs(r["adaptive_error_ms"]) for r in results if r["adaptive_error_ms"] is not None]
+
+    mean_abs_fixed_ms = sum(fixed_abs) / len(fixed_abs) if fixed_abs else None
+    mean_abs_adapt_ms = sum(adapt_abs) / len(adapt_abs) if adapt_abs else None
+    max_abs_adapt_ms  = max(adapt_abs)                   if adapt_abs else None
+
+    if mean_abs_fixed_ms is not None and mean_abs_adapt_ms is not None:
+        adapt_improvement_ms = mean_abs_fixed_ms - mean_abs_adapt_ms
+        adapt_improvement_pct = (
+            100.0 * adapt_improvement_ms / mean_abs_fixed_ms
+            if mean_abs_fixed_ms > 0 else None
+        )
+    else:
+        adapt_improvement_ms  = None
+        adapt_improvement_pct = None
+
+    limits = [
+        r["effective_outlier_limit_ms"]
+        for r in results
+        if r.get("effective_outlier_limit_ms") is not None
+    ]
+    outlier_limit_min_ms = min(limits) if limits else None
+    outlier_limit_max_ms = max(limits) if limits else None
+
+    return {
+        "accepted":              accepted,
+        "rejected":              rejected,
+        "missed":                missed,
+        "final_bpm":             final_bpm,
+        "bpm_min":               bpm_min,
+        "bpm_max":               bpm_max,
+        "mean_abs_fixed_ms":     mean_abs_fixed_ms,
+        "mean_abs_adapt_ms":     mean_abs_adapt_ms,
+        "max_abs_adapt_ms":      max_abs_adapt_ms,
+        "adapt_improvement_ms":  adapt_improvement_ms,
+        "adapt_improvement_pct": adapt_improvement_pct,
+        "outlier_limit_min_ms":  outlier_limit_min_ms,
+        "outlier_limit_max_ms":  outlier_limit_max_ms,
+    }
+
+
+def format_summary(summary: dict, title: str = "") -> str:
+    """Return a compact multi-line summary string for one scenario."""
+
+    def _f(v: float | None, fmt: str) -> str:
+        return "—" if v is None else format(v, fmt)
+
+    sep = "─" * 60
+
+    lines = [sep]
+    if title:
+        lines.append(f"  {title}")
+        lines.append("")
+
+    lines.append(
+        f"  Observations          : "
+        f"{summary['accepted']} accepted  "
+        f"{summary['rejected']} rejected  "
+        f"{summary['missed']} missed"
+    )
+    lines.append(
+        f"  Final BPM             : {_f(summary['final_bpm'], '.1f')}"
+        f"  (range {_f(summary['bpm_min'], '.1f')}–{_f(summary['bpm_max'], '.1f')})"
+    )
+    lines.append(
+        f"  Mean error (fixed)    : {_f(summary['mean_abs_fixed_ms'], '.1f')} ms"
+    )
+    lines.append(
+        f"  Mean error (adaptive) : {_f(summary['mean_abs_adapt_ms'], '.1f')} ms"
+        f"  max {_f(summary['max_abs_adapt_ms'], '.1f')} ms"
+    )
+
+    imp_ms  = summary["adapt_improvement_ms"]
+    imp_pct = summary["adapt_improvement_pct"]
+    if imp_ms is not None:
+        pct_str = f"  ({_f(imp_pct, '+.1f')}%)" if imp_pct is not None else ""
+        lines.append(
+            f"  Adaptive improvement  : {_f(imp_ms, '+.1f')} ms{pct_str}"
+        )
+
+    lim_min = summary["outlier_limit_min_ms"]
+    lim_max = summary["outlier_limit_max_ms"]
+    if lim_min is not None:
+        if abs(lim_min - lim_max) < 0.1:
+            lim_str = f"{lim_min:.0f} ms (constant)"
+        else:
+            lim_str = f"{lim_min:.0f}–{lim_max:.0f} ms (widened by drift detection)"
+        lines.append(f"  Effective outlier lim : {lim_str}")
+
+    lines.append(sep)
+    return "\n".join(lines)
 
 
 # ── Scenario registry ─────────────────────────────────────────────────────────
@@ -390,6 +521,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--csv",            default="",
                    metavar="PATH",
                    help="Optional path to write CSV output.")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--summary-only", action="store_true", default=False, dest="summary_only",
+        help="Print only the summary; suppress the per-beat table.",
+    )
+    mode.add_argument(
+        "--no-summary", action="store_true", default=False, dest="no_summary",
+        help="Print only the per-beat table; suppress the summary (original behavior).",
+    )
     return p.parse_args(argv)
 
 
@@ -397,12 +537,19 @@ def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
     scenarios = build_scenarios(args)
 
+    show_table   = not args.summary_only
+    show_summary = not args.no_summary
+
     all_results: list[dict] = []
 
     for title, onsets in scenarios:
         results = run_replay(onsets, args.nominal_bpm)
-        print(format_table(results, title=title))
-        print()
+        if show_table:
+            print(format_table(results, title=title))
+            print()
+        if show_summary:
+            print(format_summary(summarize_results(results), title=title))
+            print()
         if args.csv:
             for r in results:
                 r["_scenario"] = title
