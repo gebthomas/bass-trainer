@@ -27,7 +27,10 @@
       "Bash(pytest tests/test_session_engine_sequences.py -v)",
       "Bash(pytest tests/test_session_engine.py tests/test_session_engine_sequences.py -v)",
       "Bash(python3.11 -c ' *)",
-      "Bash(pytest tests/test_session_engine.py tests/test_session_engine_sequences.py --tb=no -q)"
+      "Bash(pytest tests/test_session_engine.py tests/test_session_engine_sequences.py --tb=no -q)",
+      "Bash(python -m pytest tests/test_onset_adapter.py -v)",
+      "Bash(python3 -m pytest tests/test_onset_adapter.py -v)",
+      "Bash(pytest tests/test_onset_adapter.py -v)"
     ]
   }
 }
