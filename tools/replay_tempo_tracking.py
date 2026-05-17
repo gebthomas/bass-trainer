@@ -199,10 +199,11 @@ def run_replay(
         raw_error_s = act - adjusted
         fixed_error_s = act - nom
 
-        # Determine acceptance status.
+        # Determine acceptance status using the same effective limit that
+        # observe() will apply (includes drift-detection widening).
         if not tracker.has_anchor:
             status = "anchor"
-        elif abs(raw_error_s) <= tracker.outlier_limit_s:
+        elif abs(raw_error_s) <= tracker.effective_outlier_limit():
             status = "accept"
         else:
             status = "reject"
