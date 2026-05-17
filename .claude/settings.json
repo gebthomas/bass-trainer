@@ -16,7 +16,14 @@
       "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario accel --start-bpm 120 --end-bpm 132 --beats 48)",
       "Bash(.venv/bin/python -m pytest tests/test_tempo_tracker_drift.py -v)",
       "Bash(.venv/bin/python tools/replay_tempo_tracking.py --scenario all --summary-only --beats 32)",
-      "Bash(.venv/bin/python -m pytest tests/test_replay_summary.py -v)"
+      "Bash(.venv/bin/python -m pytest tests/test_replay_summary.py -v)",
+      "Bash(python -m pytest tests/test_replay_summary.py -v)",
+      "Bash(python3 -m pytest tests/test_replay_summary.py -v)",
+      "Bash(pytest tests/test_replay_summary.py -v)",
+      "Bash(pytest tests/test_session_engine.py -v)",
+      "Bash(python3.11 -m pytest tests/ --ignore=tests/test_pitch_reference_regression.py --collect-only -q)",
+      "Bash(pytest -v)",
+      "Bash(pytest)"
     ]
   }
 }
