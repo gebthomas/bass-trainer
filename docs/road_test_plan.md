@@ -25,7 +25,7 @@ Run the test suite:
 python3.11 -m pytest
 ```
 
-Expected: 837 passed, 1 skipped, 0 failed.
+Expected: all tests pass, 0 failed. (The exact count grows as modules are added; the important signal is zero failures.)
 
 Then confirm the demo script loads:
 
