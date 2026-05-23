@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from core.alignment import estimated_bpm
 from core.session_bundle import SessionBundle, bundle_target_audio_times, validate_session_bundle
+from core.timing_policy import match_window_s
 from core.session_log import (
     EXTRA_ONSET,
     TARGET_HIT,
@@ -157,13 +158,13 @@ def run_session_bundle(
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 def _default_match_window(bundle: SessionBundle) -> float:
-    """Return half-a-beat match window in seconds for *bundle*."""
+    """Return canonical match window in seconds for *bundle*."""
     mode = bundle.practice_mode.mode
     if mode == "metronome_exercise" and bundle.exercise is not None:
-        return 30.0 / bundle.exercise.bpm
+        return match_window_s(bundle.exercise.bpm)
     if mode == "recording_aligned_exercise" and bundle.alignment is not None:
-        return 30.0 / estimated_bpm(bundle.alignment)
-    return 0.25
+        return match_window_s(estimated_bpm(bundle.alignment))
+    return match_window_s(120.0)
 
 
 def _match(

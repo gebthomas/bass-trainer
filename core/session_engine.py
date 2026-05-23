@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from core.feedback_events import feedback_event
 from core.target_windows import target_audio_time_s
 from core.tempo_tracker import TempoTracker
+from core.timing_policy import match_window_s as _match_window_s
 
 
 @dataclass
@@ -62,7 +63,7 @@ class SessionEngine:
 
     def __post_init__(self) -> None:
         if self.match_window_s is None:
-            self.match_window_s = 30.0 / self.bpm  # half a beat
+            self.match_window_s = _match_window_s(self.bpm)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
