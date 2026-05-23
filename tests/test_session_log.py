@@ -23,6 +23,10 @@ Validation — events: time_sec
 Validation — events: event_type
   9.  Event with empty event_type raises ValueError.
   10. Event with whitespace-only event_type raises ValueError.
+  10b. Valid target_hit accepted.
+  10c. Valid target_miss accepted.
+  10d. Valid extra_onset accepted.
+  10e. Unknown event_type raises ValueError.
 
 Validation — events: target_index
   11. Event with target_index < 0 raises ValueError.
@@ -76,7 +80,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.session_log import (
+    ALLOWED_EVENT_TYPES,
+    EXTRA_ONSET,
     SCHEMA_VERSION,
+    TARGET_HIT,
+    TARGET_MISS,
     SessionEvent,
     SessionLog,
     append_event,
@@ -97,7 +105,7 @@ def _minimal_dict() -> dict:
 
 
 def _minimal_event() -> SessionEvent:
-    return SessionEvent(time_sec=0.5, event_type="hit", target_index=0)
+    return SessionEvent(time_sec=0.5, event_type=TARGET_HIT, target_index=0)
 
 
 def _minimal_log() -> SessionLog:
@@ -118,13 +126,13 @@ def test_valid_empty_log():
 def test_valid_log_with_events():
     data = _minimal_dict()
     data["events"] = [
-        {"time_sec": 0.5, "event_type": "hit",  "target_index": 0},
-        {"time_sec": 1.0, "event_type": "miss", "target_index": 1},
+        {"time_sec": 0.5, "event_type": "target_hit",  "target_index": 0},
+        {"time_sec": 1.0, "event_type": "target_miss", "target_index": 1},
     ]
     log = session_log_from_dict(data)
     assert len(log.events)          == 2
-    assert log.events[0].event_type == "hit"
-    assert log.events[1].event_type == "miss"
+    assert log.events[0].event_type == TARGET_HIT
+    assert log.events[1].event_type == TARGET_MISS
 
 
 def test_defaults():
@@ -165,14 +173,14 @@ def test_whitespace_started_at_raises():
 
 def test_event_negative_time_raises():
     log = _minimal_log()
-    log.events.append(SessionEvent(time_sec=-0.1, event_type="hit"))
+    log.events.append(SessionEvent(time_sec=-0.1, event_type=TARGET_HIT))
     with pytest.raises(ValueError, match="time_sec"):
         validate_session_log(log)
 
 
 def test_event_zero_time_valid():
     log = _minimal_log()
-    log.events.append(SessionEvent(time_sec=0.0, event_type="hit"))
+    log.events.append(SessionEvent(time_sec=0.0, event_type=TARGET_HIT))
     validate_session_log(log)  # must not raise
 
 
@@ -196,14 +204,14 @@ def test_event_whitespace_type_raises():
 
 def test_event_negative_target_index_raises():
     log = _minimal_log()
-    log.events.append(SessionEvent(time_sec=0.5, event_type="hit", target_index=-1))
+    log.events.append(SessionEvent(time_sec=0.5, event_type=TARGET_HIT, target_index=-1))
     with pytest.raises(ValueError, match="target_index"):
         validate_session_log(log)
 
 
 def test_event_zero_target_index_valid():
     log = _minimal_log()
-    log.events.append(SessionEvent(time_sec=0.5, event_type="hit", target_index=0))
+    log.events.append(SessionEvent(time_sec=0.5, event_type=TARGET_HIT, target_index=0))
     validate_session_log(log)  # must not raise
 
 
@@ -212,7 +220,7 @@ def test_event_zero_target_index_valid():
 def test_event_metadata_non_string_raises():
     event = SessionEvent(
         time_sec=0.5,
-        event_type="hit",
+        event_type=TARGET_HIT,
         metadata={"score": 42},  # type: ignore[dict-item]
     )
     log = _minimal_log()
@@ -287,8 +295,8 @@ def test_json_roundtrip_empty_log():
 def test_json_roundtrip_log_with_events_and_metrics():
     data = _minimal_dict()
     data["events"] = [
-        {"time_sec": 0.5, "event_type": "hit",  "target_index": 0, "value": -0.02},
-        {"time_sec": 1.0, "event_type": "miss", "target_index": 1},
+        {"time_sec": 0.5, "event_type": "target_hit",  "target_index": 0, "value": -0.02},
+        {"time_sec": 1.0, "event_type": "target_miss", "target_index": 1},
     ]
     data["metrics"] = {"hit_rate": 0.5, "mean_timing_error_ms": 20.0}
     log  = session_log_from_dict(data)
@@ -316,7 +324,7 @@ def test_optional_paths_preserved_through_json():
 
 def test_save_load_roundtrip(tmp_path):
     data = _minimal_dict()
-    data["events"]  = [{"time_sec": 0.5, "event_type": "hit", "target_index": 0}]
+    data["events"]  = [{"time_sec": 0.5, "event_type": "target_hit", "target_index": 0}]
     data["metrics"] = {"hit_rate": 1.0}
     log  = session_log_from_dict(data)
     dest = tmp_path / "sessions" / "test.json"
@@ -340,7 +348,7 @@ def test_event_metadata_preserved():
     data["events"] = [
         {
             "time_sec": 0.5,
-            "event_type": "hit",
+            "event_type": "target_hit",
             "metadata": {"detected_pitch": "E1", "string": "E"},
         }
     ]
@@ -386,7 +394,7 @@ def test_append_event_returns_log():
 
 def test_append_event_invalid_time_raises_and_does_not_append():
     log   = _minimal_log()
-    bad   = SessionEvent(time_sec=-1.0, event_type="hit")
+    bad   = SessionEvent(time_sec=-1.0, event_type=TARGET_HIT)
     with pytest.raises(ValueError, match="time_sec"):
         append_event(log, bad)
     assert log.events == []
@@ -402,12 +410,39 @@ def test_append_event_invalid_type_raises_and_does_not_append():
 
 def test_append_event_accumulates_in_order():
     log = _minimal_log()
-    ev1 = SessionEvent(time_sec=0.5, event_type="hit",  target_index=0)
-    ev2 = SessionEvent(time_sec=1.0, event_type="miss", target_index=1)
-    ev3 = SessionEvent(time_sec=1.5, event_type="hit",  target_index=2)
+    ev1 = SessionEvent(time_sec=0.5, event_type=TARGET_HIT,  target_index=0)
+    ev2 = SessionEvent(time_sec=1.0, event_type=TARGET_MISS, target_index=1)
+    ev3 = SessionEvent(time_sec=1.5, event_type=TARGET_HIT,  target_index=2)
     append_event(log, ev1)
     append_event(log, ev2)
     append_event(log, ev3)
     assert len(log.events) == 3
-    assert [e.event_type for e in log.events] == ["hit", "miss", "hit"]
+    assert [e.event_type for e in log.events] == [TARGET_HIT, TARGET_MISS, TARGET_HIT]
     assert [e.target_index for e in log.events] == [0, 1, 2]
+
+
+# ── 10b–10e: event_type vocabulary ───────────────────────────────────────────
+
+def test_valid_target_hit_accepted():
+    log = _minimal_log()
+    log.events.append(SessionEvent(time_sec=0.5, event_type=TARGET_HIT))
+    validate_session_log(log)  # must not raise
+
+
+def test_valid_target_miss_accepted():
+    log = _minimal_log()
+    log.events.append(SessionEvent(time_sec=0.5, event_type=TARGET_MISS))
+    validate_session_log(log)  # must not raise
+
+
+def test_valid_extra_onset_accepted():
+    log = _minimal_log()
+    log.events.append(SessionEvent(time_sec=0.5, event_type=EXTRA_ONSET))
+    validate_session_log(log)  # must not raise
+
+
+def test_unknown_event_type_raises():
+    log = _minimal_log()
+    log.events.append(SessionEvent(time_sec=0.5, event_type="hit"))
+    with pytest.raises(ValueError, match="event_type"):
+        validate_session_log(log)

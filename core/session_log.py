@@ -15,7 +15,7 @@ Typical usage
     )
 
     log = SessionLog(schema_version=1, started_at="2026-05-23T10:00:00")
-    event = SessionEvent(time_sec=0.5, event_type="hit", target_index=0)
+    event = SessionEvent(time_sec=0.5, event_type=TARGET_HIT, target_index=0)
     append_event(log, event)
     save_session_log_file(log, "sessions/2026-05-23.json")
 
@@ -35,6 +35,11 @@ from pathlib import Path
 from typing import Optional
 
 SCHEMA_VERSION: int = 1
+
+TARGET_HIT:          str            = "target_hit"
+TARGET_MISS:         str            = "target_miss"
+EXTRA_ONSET:         str            = "extra_onset"
+ALLOWED_EVENT_TYPES: frozenset[str] = frozenset({TARGET_HIT, TARGET_MISS, EXTRA_ONSET})
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -115,8 +120,11 @@ def _validate_event(event: SessionEvent, index: int | None = None) -> None:
     ctx = f"events[{index}]." if index is not None else "event."
     if event.time_sec < 0:
         raise ValueError(f"{ctx}time_sec must be >= 0, got {event.time_sec}")
-    if not event.event_type or not event.event_type.strip():
-        raise ValueError(f"{ctx}event_type must be non-empty")
+    if event.event_type not in ALLOWED_EVENT_TYPES:
+        raise ValueError(
+            f"{ctx}event_type must be one of {sorted(ALLOWED_EVENT_TYPES)}, "
+            f"got {event.event_type!r}"
+        )
     if event.target_index is not None and event.target_index < 0:
         raise ValueError(
             f"{ctx}target_index must be >= 0, got {event.target_index}"

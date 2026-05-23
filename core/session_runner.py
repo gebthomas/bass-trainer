@@ -38,7 +38,14 @@ from __future__ import annotations
 
 from core.alignment import estimated_bpm
 from core.session_bundle import SessionBundle, bundle_target_audio_times, validate_session_bundle
-from core.session_log import SessionEvent, SessionLog, validate_session_log
+from core.session_log import (
+    EXTRA_ONSET,
+    TARGET_HIT,
+    TARGET_MISS,
+    SessionEvent,
+    SessionLog,
+    validate_session_log,
+)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -104,14 +111,14 @@ def run_session_bundle(
             onset_t = onsets[o_idx]
             events.append(SessionEvent(
                 time_sec     = onset_t,
-                event_type   = "target_hit",
+                event_type   = TARGET_HIT,
                 target_index = t_idx,
                 value        = onset_t - t_time,
             ))
         else:
             events.append(SessionEvent(
                 time_sec     = t_time,
-                event_type   = "target_miss",
+                event_type   = TARGET_MISS,
                 target_index = t_idx,
             ))
 
@@ -119,7 +126,7 @@ def run_session_bundle(
     for o_idx in sorted(extra_onset_idxs):
         events.append(SessionEvent(
             time_sec   = onsets[o_idx],
-            event_type = "extra_onset",
+            event_type = EXTRA_ONSET,
         ))
 
     events.sort(key=lambda e: e.time_sec)
