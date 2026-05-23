@@ -90,7 +90,9 @@ def compute_log_metrics(log: SessionLog) -> LogMetrics:
     Raises
     ------
     ValueError
-        If log validation fails.
+        If log validation fails, or if a TARGET_HIT event has value=None.
+        A hit without a timing error cannot be classified and would silently
+        break the severity accounting invariant.
     """
     validate_session_log(log)
 
@@ -105,15 +107,19 @@ def compute_log_metrics(log: SessionLog) -> LogMetrics:
     for event in log.events:
         if event.event_type == TARGET_HIT:
             n_hit += 1
-            if event.value is not None:
-                hit_errors.append(event.value)
-                sev = event_timing_severity(event)
-                if sev == SEVERITY_GOOD:
-                    n_good += 1
-                elif sev == SEVERITY_WARN:
-                    n_warn += 1
-                else:
-                    n_miss_sev += 1
+            if event.value is None:
+                raise ValueError(
+                    "compute_log_metrics: TARGET_HIT event has value=None; "
+                    "timing error in seconds is required for severity classification"
+                )
+            hit_errors.append(event.value)
+            sev = event_timing_severity(event)
+            if sev == SEVERITY_GOOD:
+                n_good += 1
+            elif sev == SEVERITY_WARN:
+                n_warn += 1
+            else:
+                n_miss_sev += 1
         elif event.event_type == TARGET_MISS:
             n_miss += 1
             n_miss_sev += 1

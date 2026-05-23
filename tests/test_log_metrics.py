@@ -134,6 +134,11 @@ class TestComputeLogMetrics:
         with pytest.raises(ValueError):
             compute_log_metrics(bad_log)
 
+    def test_target_hit_with_no_value_raises(self):
+        event = SessionEvent(time_sec=1.0, event_type=TARGET_HIT, target_index=0, value=None)
+        with pytest.raises(ValueError, match="value=None"):
+            compute_log_metrics(_make_log(event))
+
     def test_mixed_all_event_types_combined(self):
         log = _make_log(
             _hit(0.01, 0),   # good
