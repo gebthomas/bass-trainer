@@ -4,6 +4,12 @@ All tests are pure Python; no audio hardware required.
 
 Test matrix
 -----------
+Bundle validation
+  0.  Invalid bundle (metronome with no exercise) raises ValueError before any
+      processing occurs.
+  0b. Invalid bundle (metronome with alignment present) raises ValueError.
+  0c. Valid bundles are not rejected.
+
 Metronome mode
   1.  Happy path: all onsets within window → all target_hit events.
   2.  Two targets missed → two target_miss events with correct target_index.
@@ -372,3 +378,50 @@ def test_extra_onset_target_index_is_none():
     extra = log.events[0]
     assert extra.event_type    == "extra_onset"
     assert extra.target_index  is None
+
+
+# ── 0: bundle validation at entry ─────────────────────────────────────────────
+
+def test_invalid_bundle_no_exercise_raises_before_processing():
+    # metronome_exercise with no exercise — validate_session_bundle should fire
+    # immediately and raise ValueError before any matching or event creation.
+    bundle = SessionBundle(practice_mode=_metro_mode())  # exercise=None
+    with pytest.raises(ValueError, match="exercise"):
+        run_session_bundle(bundle, [1.0, 1.5, 2.0, 2.5], started_at=_STARTED)
+
+
+def test_invalid_bundle_metronome_with_alignment_raises():
+    # metronome_exercise must not have an alignment.
+    bundle = SessionBundle(
+        practice_mode = _metro_mode(),
+        exercise      = _metro_exercise(),
+        alignment     = _alignment(),
+    )
+    with pytest.raises(ValueError, match="alignment"):
+        run_session_bundle(bundle, [], started_at=_STARTED)
+
+
+def test_invalid_bundle_aligned_no_alignment_raises():
+    # recording_aligned_exercise requires both exercise and alignment.
+    bundle = SessionBundle(
+        practice_mode = _aligned_mode(),
+        exercise      = _metro_exercise(),
+        # alignment intentionally absent
+    )
+    with pytest.raises(ValueError, match="alignment"):
+        run_session_bundle(bundle, [], started_at=_STARTED)
+
+
+def test_valid_metronome_bundle_not_rejected():
+    log = run_session_bundle(_metro_bundle(), [], started_at=_STARTED)
+    assert log.schema_version == 1
+
+
+def test_valid_aligned_bundle_not_rejected():
+    log = run_session_bundle(_aligned_bundle(), [], started_at=_STARTED)
+    assert log.schema_version == 1
+
+
+def test_valid_play_to_align_bundle_not_rejected():
+    log = run_session_bundle(_play_bundle(), [], started_at=_STARTED)
+    assert log.schema_version == 1

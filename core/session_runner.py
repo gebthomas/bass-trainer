@@ -37,7 +37,7 @@ This matches the ``SessionEngine`` default of ``30.0 / bpm``.
 from __future__ import annotations
 
 from core.alignment import estimated_bpm
-from core.session_bundle import SessionBundle, bundle_target_audio_times
+from core.session_bundle import SessionBundle, bundle_target_audio_times, validate_session_bundle
 from core.session_log import SessionEvent, SessionLog, validate_session_log
 
 
@@ -83,6 +83,8 @@ def run_session_bundle(
     -------
     ``targets_total``, ``targets_hit``, ``targets_missed``, ``extra_onsets``
     """
+    validate_session_bundle(bundle)
+
     pm           = bundle.practice_mode
     target_times = bundle_target_audio_times(bundle)
     onsets       = sorted(onset_times_sec)
