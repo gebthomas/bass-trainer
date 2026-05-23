@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "mode": "recording_aligned_exercise",
+  "exercise_path": "exercises/basic_four_beats.json",
+  "alignment_path": "alignments/basic_four_beats_track.json",
+  "description": "Four quarter-note exercise aligned to a backing track recording.",
+  "metadata": {}
+}

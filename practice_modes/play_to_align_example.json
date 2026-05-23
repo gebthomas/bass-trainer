@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "mode": "play_to_align",
+  "audio_file": "tracks/my_track.wav",
+  "description": "Play along with a recording to generate a beat alignment for later use.",
+  "metadata": {}
+}

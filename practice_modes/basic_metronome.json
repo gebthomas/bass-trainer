@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "mode": "metronome_exercise",
+  "exercise_path": "exercises/basic_four_beats.json",
+  "description": "Four quarter-note exercise with a synthetic metronome clock.",
+  "metadata": {}
+}
