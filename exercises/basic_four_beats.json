@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "Basic Four Beats",
+  "bpm": 120.0,
+  "count_in_beats": 2,
+  "description": "Four quarter-note targets. Play one note on each beat.",
+  "tags": ["timing", "beginner", "quarter-notes"],
+  "targets": [
+    {"time": 0},
+    {"time": 1},
+    {"time": 2},
+    {"time": 3}
+  ]
+}

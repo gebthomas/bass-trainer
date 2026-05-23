@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "audio_file": "tracks/basic_four_beats.wav",
+  "alignment_method": "manual_tap",
+  "first_beat_time_sec": 2.0,
+  "last_beat_time_sec": 5.0,
+  "beat_count": 4,
+  "beats_per_bar": 4,
+  "confirmed_by_user": true,
+  "confidence": "fixture",
+  "metadata": {}
+}

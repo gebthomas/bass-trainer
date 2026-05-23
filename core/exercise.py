@@ -1,202 +1,347 @@
-"""Shared exercise/session configuration model.
+"""Versioned exercise schema for bass practice sessions.
 
-Pure dataclasses and stdlib only — no audio hardware, no file I/O.
+Pure data modeling and validation — no audio hardware, no external dependencies.
 
-An Exercise bundles everything needed to configure a practice session:
-tempo, targets, onset-detection sensitivity, and tracker tuning. It can
-be serialised to/from a plain dict (for JSON round-tripping by callers)
-and converts itself into constructor kwargs for each engine class.
+An Exercise is a self-contained, serialisable description of a practice task.
+It can be loaded from JSON, validated, and passed to the session engine,
+replay tools, or a future UI without modification.
 
 Typical usage
 -------------
-    import json
-    from core.exercise import Exercise
-    from core.onset_adapter import OnsetAdapter
-    from core.session_engine import SessionEngine
-    from core.tempo_tracker import TempoTracker
+    from core.exercise import exercise_from_json, exercise_to_json
 
-    data    = json.loads(path.read_text())
-    ex      = Exercise.from_dict(data)
+    ex  = exercise_from_json(path.read_text())
+    out = exercise_to_json(ex, indent=2)
 
-    tracker = TempoTracker(ex.bpm, **ex.to_tracker_kwargs())
-    engine  = SessionEngine(**ex.to_session_engine_kwargs(), tracker=tracker)
-    adapter = OnsetAdapter(sample_rate=sample_rate, **ex.to_onset_adapter_kwargs())
+    # Convenience constructor for timing-only exercises:
+    from core.exercise import simple_timing_exercise
+    ex = simple_timing_exercise("Quarter notes at 120", 120.0, 2, [1, 2, 3, 4])
 
-Note: ``sample_rate`` is intentionally absent from Exercise — it is a
-hardware property supplied at runtime, not an exercise property.
+Schema version
+--------------
+schema_version is stored in every serialised exercise so that loaders can
+detect incompatible formats before attempting to deserialise them.  The
+current version is 1; future breaking changes will increment this value.
+
+Backward compatibility with existing target dicts
+-------------------------------------------------
+exercise_from_dict() accepts target dicts that contain at least a "time" key,
+including the old {"time": float, "note": str} format used by the replay
+harness.  The "note" field is mapped to expected_pitch if present.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+SCHEMA_VERSION: int = 1
 
 
-# ── Sub-configs ───────────────────────────────────────────────────────────────
-
-@dataclass
-class OnsetAdapterConfig:
-    """Onset-detection thresholds for OnsetAdapter.
-
-    Defaults match the OnsetAdapter class defaults exactly so that omitting
-    this config from a session dict produces identical behaviour to the demo.
-    """
-
-    min_rms:      float = 0.018
-    min_peak:     float = 0.15
-    refractory_s: float = 0.150
-
-    def __post_init__(self) -> None:
-        if self.min_rms < 0:
-            raise ValueError(f"min_rms must be >= 0, got {self.min_rms}")
-        if self.min_peak < 0:
-            raise ValueError(f"min_peak must be >= 0, got {self.min_peak}")
-        if self.refractory_s <= 0:
-            raise ValueError(f"refractory_s must be > 0, got {self.refractory_s}")
-
+# ── Data model ────────────────────────────────────────────────────────────────
 
 @dataclass
-class TrackerConfig:
-    """Tuning parameters for TempoTracker.
+class Target:
+    """A single practice target within an exercise.
 
-    Defaults match the TempoTracker.__init__ defaults exactly.
+    Parameters
+    ----------
+    time
+        Beat-relative onset time after the count-in.  Must be >= 0.
+        Two targets may share the same time (e.g. simultaneous chord tones).
+    label
+        Optional display label (e.g. "beat 1", "root", "5th").
+    expected_pitch
+        Expected pitch as a note name ("E1", "A2") or a frequency in Hz.
+        None means timing-only; pitch is not evaluated.
+    duration_beats
+        Optional note duration in beats.  When provided, must be > 0.
+    metadata
+        Arbitrary string key/value pairs for tool-specific annotations.
     """
 
-    phase_alpha:           float = 0.10
-    tempo_beta:            float = 0.30
-    outlier_threshold:     float = 0.40
-    confidence_window:     int   = 8
-    drift_window:          int   = 4
-    drift_threshold_scale: float = 2.0
-    drift_min_frac:        float = 0.10
+    time:            float
+    label:           Optional[str]   = None
+    expected_pitch:  Optional[str | float] = None
+    duration_beats:  Optional[float] = None
+    metadata:        dict[str, str]  = field(default_factory=dict)
 
-
-# ── Exercise ──────────────────────────────────────────────────────────────────
 
 @dataclass
 class Exercise:
-    """Shared configuration model for a bass practice session.
+    """A versioned, serialisable practice exercise.
+
+    Parameters
+    ----------
+    schema_version
+        Must be 1 for the current format.
+    name
+        Human-readable exercise name.  Must be non-empty.
+    bpm
+        Nominal tempo in beats per minute.  Must be > 0.
+    count_in_beats
+        Number of count-in beats before the first target.  Must be >= 0.
+    targets
+        Ordered list of targets.  Must not be empty.  Times must be
+        monotonically nondecreasing (equal times are allowed for simultaneous
+        notes; strictly decreasing times are not permitted).
+    description
+        Optional prose description shown to the player or in exercise browsers.
+    tags
+        List of string tags for filtering and categorisation (e.g. "ii-V-I",
+        "walking-bass", "beginner").
+    metadata
+        Arbitrary string key/value pairs for tool-specific use.
+    """
+
+    schema_version: int
+    name:           str
+    bpm:            float
+    count_in_beats: int
+    targets:        list[Target]
+    description:    Optional[str]   = None
+    tags:           list[str]       = field(default_factory=list)
+    metadata:       dict[str, str]  = field(default_factory=dict)
+
+
+# ── Validation ────────────────────────────────────────────────────────────────
+
+def validate_exercise(exercise: Exercise) -> None:
+    """Validate an Exercise, raising ValueError on the first violation found.
+
+    Called automatically by exercise_from_dict() and simple_timing_exercise().
+    Callers that construct Exercise directly should call this explicitly if
+    they need to confirm validity.
+    """
+    if exercise.schema_version != SCHEMA_VERSION:
+        raise ValueError(
+            f"schema_version must be {SCHEMA_VERSION}, got {exercise.schema_version}"
+        )
+    if not exercise.name or not exercise.name.strip():
+        raise ValueError("name must be non-empty")
+    if exercise.bpm <= 0:
+        raise ValueError(f"bpm must be > 0, got {exercise.bpm}")
+    if exercise.count_in_beats < 0:
+        raise ValueError(f"count_in_beats must be >= 0, got {exercise.count_in_beats}")
+    if not exercise.targets:
+        raise ValueError("targets must not be empty")
+
+    prev_time: float | None = None
+    for i, t in enumerate(exercise.targets):
+        if t.time < 0:
+            raise ValueError(
+                f"targets[{i}].time must be >= 0, got {t.time}"
+            )
+        if prev_time is not None and t.time < prev_time:
+            raise ValueError(
+                f"target times must be monotonically nondecreasing; "
+                f"targets[{i}].time={t.time} < targets[{i - 1}].time={prev_time}"
+            )
+        if t.duration_beats is not None and t.duration_beats <= 0:
+            raise ValueError(
+                f"targets[{i}].duration_beats must be > 0, got {t.duration_beats}"
+            )
+        for k, v in t.metadata.items():
+            if not isinstance(v, str):
+                raise ValueError(
+                    f"targets[{i}].metadata[{k!r}] must be a str, "
+                    f"got {type(v).__name__}"
+                )
+        prev_time = t.time
+
+    for k, v in exercise.metadata.items():
+        if not isinstance(v, str):
+            raise ValueError(
+                f"exercise.metadata[{k!r}] must be a str, got {type(v).__name__}"
+            )
+
+
+# ── Serialisation ─────────────────────────────────────────────────────────────
+
+def exercise_to_dict(exercise: Exercise) -> dict:
+    """Return a JSON-serialisable dict representation of *exercise*.
+
+    Uses dataclasses.asdict() to recursively convert nested Target objects.
+    All fields are included in the output, including optional ones that are
+    None, so that the format is stable and round-trippable.
+    """
+    return dataclasses.asdict(exercise)
+
+
+def exercise_from_dict(data: dict) -> Exercise:
+    """Construct and validate an Exercise from a plain dict.
+
+    Accepts the current schema as well as the older {"time": ..., "note": ...}
+    target format used by the replay harness.  The "note" field is mapped to
+    expected_pitch when expected_pitch is not already present.
+
+    Raises
+    ------
+    KeyError
+        If a required field is missing.
+    ValueError
+        If validation fails.
+    """
+    targets = [_target_from_dict(t) for t in data["targets"]]
+    exercise = Exercise(
+        schema_version = int(data["schema_version"]),
+        name           = str(data["name"]),
+        bpm            = float(data["bpm"]),
+        count_in_beats = int(data["count_in_beats"]),
+        targets        = targets,
+        description    = data.get("description"),
+        tags           = list(data.get("tags") or []),
+        metadata       = {str(k): str(v) for k, v in (data.get("metadata") or {}).items()},
+    )
+    validate_exercise(exercise)
+    return exercise
+
+
+def exercise_to_json(exercise: Exercise, *, indent: int = 2) -> str:
+    """Serialise *exercise* to a JSON string."""
+    return json.dumps(exercise_to_dict(exercise), indent=indent)
+
+
+def exercise_from_json(text: str) -> Exercise:
+    """Parse *text* as JSON and return a validated Exercise."""
+    return exercise_from_dict(json.loads(text))
+
+
+# ── Convenience constructor ───────────────────────────────────────────────────
+
+def simple_timing_exercise(
+    name:           str,
+    bpm:            float,
+    count_in_beats: int,
+    target_times:   list[float],
+) -> Exercise:
+    """Return a validated timing-only Exercise from a list of beat positions.
+
+    All targets are created with time only; label, expected_pitch, and
+    duration_beats are left as None.  Useful for quick construction in tests
+    and the live demo.
 
     Parameters
     ----------
     name
-        Human-readable exercise name.
+        Exercise name.
     bpm
-        Nominal tempo in beats per minute.
+        Tempo in beats per minute.
     count_in_beats
-        Number of count-in beats before the first target. These are played
-        (or simulated) before the session clock starts; targets are timed
-        relative to the first beat after the count-in.
-    targets
-        Ordered list of target dicts.  Each must have a ``"time"`` key
-        (positive number, beats) and may have a ``"note"`` key (str).
-        Times must be strictly increasing.
-    match_window_s
-        Half-width of the onset-acceptance window in seconds.
-        ``None`` means SessionEngine computes its default (half a beat).
-    onset
-        Onset-detection thresholds.  Defaults to OnsetAdapterConfig defaults.
-    tracker
-        Tempo/phase tracker tuning.  Defaults to TrackerConfig defaults.
+        Number of count-in beats before the first target.
+    target_times
+        Beat positions (after count-in) for each target, in order.
     """
+    targets = [Target(time=float(t)) for t in target_times]
+    exercise = Exercise(
+        schema_version = SCHEMA_VERSION,
+        name           = name,
+        bpm            = bpm,
+        count_in_beats = count_in_beats,
+        targets        = targets,
+    )
+    validate_exercise(exercise)
+    return exercise
 
-    name:           str
-    bpm:            float
-    count_in_beats: int
-    targets:        list[dict]
-    match_window_s: float | None          = None
-    onset:          OnsetAdapterConfig    = field(default_factory=OnsetAdapterConfig)
-    tracker:        TrackerConfig         = field(default_factory=TrackerConfig)
 
-    def __post_init__(self) -> None:
-        if self.bpm <= 0:
-            raise ValueError(f"bpm must be > 0, got {self.bpm}")
-        if self.count_in_beats < 0:
-            raise ValueError(f"count_in_beats must be >= 0, got {self.count_in_beats}")
-        if len(self.targets) < 1:
-            raise ValueError("targets must not be empty")
-        for i, t in enumerate(self.targets):
-            if "time" not in t:
-                raise ValueError(f"target[{i}] is missing required 'time' key")
-            if not isinstance(t["time"], (int, float)) or t["time"] <= 0:
-                raise ValueError(
-                    f"target[{i}]['time'] must be a positive number, got {t['time']!r}"
-                )
-        times = [t["time"] for t in self.targets]
-        for i in range(1, len(times)):
-            if times[i] <= times[i - 1]:
-                raise ValueError(
-                    f"target times must be strictly increasing; "
-                    f"targets[{i}]['time']={times[i]} <= targets[{i - 1}]['time']={times[i - 1]}"
-                )
-        if self.match_window_s is not None and self.match_window_s <= 0:
-            raise ValueError(f"match_window_s must be > 0, got {self.match_window_s}")
+# ── Adapter helpers ───────────────────────────────────────────────────────────
 
-    # ── Serialisation ──────────────────────────────────────────────────────────
+def exercise_targets(exercise_or_targets: "Exercise | list[dict]") -> list[dict]:
+    """Return a list of target dicts from an Exercise or pass through a raw list.
 
-    @classmethod
-    def from_dict(cls, data: dict) -> "Exercise":
-        """Construct an Exercise from a plain dict (e.g. parsed from JSON).
+    When passed an Exercise, converts each Target to the dict shape expected by
+    SessionEngine, replay_session_data, and the live pipeline — ``{"time": ...}``
+    plus optional ``"note"``, ``"label"``, ``"duration_beats"``, ``"metadata"``.
 
-        Sub-dicts for ``onset`` and ``tracker`` are optional and may be sparse —
-        missing keys fall back to class defaults.
-        """
-        onset_data   = data.get("onset",   {})
-        tracker_data = data.get("tracker", {})
-        return cls(
-            name           = data["name"],
-            bpm            = float(data["bpm"]),
-            count_in_beats = int(data["count_in_beats"]),
-            targets        = list(data["targets"]),
-            match_window_s = data.get("match_window_s"),
-            onset          = OnsetAdapterConfig(**onset_data),
-            tracker        = TrackerConfig(**tracker_data),
-        )
+    When passed a list, returns a shallow copy unchanged so callers need not
+    branch on the type of the thing they received.
+    """
+    if isinstance(exercise_or_targets, Exercise):
+        return [_target_to_engine_dict(t) for t in exercise_or_targets.targets]
+    return list(exercise_or_targets)
 
-    def to_dict(self) -> dict:
-        """Return a JSON-serialisable dict representation.
 
-        ``match_window_s`` is omitted when ``None`` so that reloading the dict
-        via ``from_dict`` preserves the "engine computes default" behaviour.
-        """
-        d = dataclasses.asdict(self)
-        if d.get("match_window_s") is None:
-            d.pop("match_window_s", None)
-        return d
+def exercise_bpm(
+    exercise_or_targets: "Exercise | list | None",
+    fallback_bpm: float | None = None,
+) -> float:
+    """Return bpm from an Exercise, or *fallback_bpm* for raw lists/None.
 
-    # ── Conversion to constructor kwargs ───────────────────────────────────────
+    Raises ValueError if no Exercise is given and fallback_bpm is also None.
+    """
+    if isinstance(exercise_or_targets, Exercise):
+        return exercise_or_targets.bpm
+    if fallback_bpm is not None:
+        return float(fallback_bpm)
+    raise ValueError(
+        "exercise_bpm: received a non-Exercise value and fallback_bpm is None"
+    )
 
-    def to_session_engine_kwargs(self) -> dict:
-        """Return kwargs for ``SessionEngine()``.
 
-        Does not include ``tracker`` or ``evaluated_indices`` — the caller
-        constructs the tracker separately and passes it in.
-        """
-        kwargs: dict = {
-            "targets":        self.targets,
-            "bpm":            self.bpm,
-            "count_in_beats": self.count_in_beats,
-        }
-        if self.match_window_s is not None:
-            kwargs["match_window_s"] = self.match_window_s
-        return kwargs
+def exercise_count_in_beats(
+    exercise_or_targets: "Exercise | list | None",
+    fallback_count_in_beats: int | None = None,
+) -> int:
+    """Return count_in_beats from an Exercise, or *fallback_count_in_beats* for raw lists/None.
 
-    def to_onset_adapter_kwargs(self) -> dict:
-        """Return kwargs for ``OnsetAdapter()``.
+    Raises ValueError if no Exercise is given and the fallback is also None.
+    """
+    if isinstance(exercise_or_targets, Exercise):
+        return exercise_or_targets.count_in_beats
+    if fallback_count_in_beats is not None:
+        return int(fallback_count_in_beats)
+    raise ValueError(
+        "exercise_count_in_beats: received a non-Exercise value and "
+        "fallback_count_in_beats is None"
+    )
 
-        Does not include ``sample_rate`` — that is a hardware property
-        supplied by the caller at runtime.
-        """
-        return {
-            "min_rms":      self.onset.min_rms,
-            "min_peak":     self.onset.min_peak,
-            "refractory_s": self.onset.refractory_s,
-        }
 
-    def to_tracker_kwargs(self) -> dict:
-        """Return kwargs for ``TempoTracker()``.
+# ── File I/O ─────────────────────────────────────────────────────────────────
 
-        Does not include ``nominal_bpm`` — pass ``ex.bpm`` as the first
-        positional argument.
-        """
-        return dataclasses.asdict(self.tracker)
+def load_exercise_file(path: str | Path) -> Exercise:
+    """Load and validate an Exercise from a JSON file."""
+    return exercise_from_json(Path(path).read_text(encoding="utf-8"))
+
+
+def save_exercise_file(exercise: Exercise, path: str | Path) -> None:
+    """Serialise *exercise* to a JSON file, creating parent directories as needed."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(exercise_to_json(exercise), encoding="utf-8")
+
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+def _target_to_engine_dict(target: Target) -> dict:
+    """Convert a Target to the dict format expected by SessionEngine and replay.
+
+    Uses ``"note"`` as the key for expected_pitch because that is the key read
+    by feedback_event() when building the ``"expected_note"`` output field.
+    """
+    d: dict = {"time": target.time}
+    if target.expected_pitch is not None:
+        d["note"] = target.expected_pitch
+    if target.label is not None:
+        d["label"] = target.label
+    if target.duration_beats is not None:
+        d["duration_beats"] = target.duration_beats
+    if target.metadata:
+        d["metadata"] = dict(target.metadata)
+    return d
+
+
+def _target_from_dict(data: dict) -> Target:
+    """Build a Target from a dict, including old-format {"time", "note"} dicts."""
+    return Target(
+        time           = float(data["time"]),
+        label          = data.get("label"),
+        expected_pitch = data.get("expected_pitch") or data.get("note") or None,
+        duration_beats = data.get("duration_beats"),
+        metadata       = {
+            str(k): str(v)
+            for k, v in (data.get("metadata") or {}).items()
+        },
+    )

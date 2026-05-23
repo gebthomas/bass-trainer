@@ -1,44 +1,54 @@
-"""Tests for core/exercise.py.
+"""Tests for core/exercise.py — versioned exercise schema.
 
-All tests are pure Python — no audio hardware required.
+All tests are pure Python; no audio hardware required.
 
 Test matrix
 -----------
-Roundtrip
-  1.  from_dict(to_dict(ex)) produces an equal Exercise.
-  2.  to_dict() output is JSON-serialisable.
+Construction
+  1.  Valid minimal exercise constructs without error.
+  2.  simple_timing_exercise produces a valid Exercise.
+  3.  schema_version defaults to SCHEMA_VERSION in simple_timing_exercise.
 
-from_dict
-  3.  Sparse "onset" sub-dict uses OnsetAdapterConfig defaults.
-  4.  Sparse "tracker" sub-dict uses TrackerConfig defaults.
-  5.  Absent match_window_s key → None on the object.
-  6.  Present match_window_s is preserved exactly.
-  7.  Partial tracker dict (only some keys) merges with defaults.
+JSON round trip
+  4.  exercise_to_json / exercise_from_json round-trips a minimal exercise.
+  5.  Round-trip preserves description, tags, and metadata.
+  6.  Round-trip preserves target label, expected_pitch, duration_beats.
+  7.  exercise_to_dict / exercise_from_dict round-trip is equal to original.
 
-Conversion methods
-  8.  to_session_engine_kwargs() contains targets, bpm, count_in_beats.
-  9.  to_session_engine_kwargs() excludes match_window_s when None.
-  10. to_session_engine_kwargs() includes match_window_s when set.
-  11. to_onset_adapter_kwargs() excludes sample_rate.
-  12. to_tracker_kwargs() excludes bpm / nominal_bpm.
-  13. SessionEngine(**ex.to_session_engine_kwargs(), tracker=tracker) constructs without error.
-  14. OnsetAdapter(sample_rate=48000, **ex.to_onset_adapter_kwargs()) constructs without error.
-  15. TempoTracker(ex.bpm, **ex.to_tracker_kwargs()) constructs without error.
-  16. Engine constructed from Exercise has the correct bpm and target count.
+Validation — Exercise
+  8.  schema_version != 1 raises ValueError.
+  9.  schema_version 0 raises ValueError.
+  10. Empty name raises ValueError.
+  11. Whitespace-only name raises ValueError.
+  12. bpm == 0 raises ValueError.
+  13. bpm < 0 raises ValueError.
+  14. count_in_beats < 0 raises ValueError.
+  15. Empty targets list raises ValueError.
 
-Validation — Exercise.__post_init__
-  17. bpm <= 0 raises ValueError.
-  18. count_in_beats < 0 raises ValueError.
-  19. Empty targets raises ValueError.
-  20. Target missing 'time' key raises ValueError.
-  21. Target time <= 0 raises ValueError.
-  22. Non-increasing target times raises ValueError.
-  23. match_window_s = 0 raises ValueError.
+Validation — Target
+  16. Negative target time raises ValueError.
+  17. Unsorted (decreasing) target times raise ValueError.
+  18. Equal target times are allowed (nondecreasing, not strictly increasing).
+  19. duration_beats == 0 raises ValueError.
+  20. duration_beats < 0 raises ValueError.
+  21. duration_beats > 0 is valid.
 
-Validation — OnsetAdapterConfig.__post_init__
-  24. min_rms < 0 raises ValueError.
-  25. min_peak < 0 raises ValueError.
-  26. refractory_s = 0 raises ValueError.
+Validation — metadata
+  22. Non-string metadata value on Exercise raises ValueError.
+  23. Non-string metadata value on Target raises ValueError.
+
+Fields and defaults
+  24. description defaults to None.
+  25. tags defaults to empty list.
+  26. metadata defaults to empty dict on Exercise and Target.
+  27. Metadata and tags are preserved through serialisation.
+
+Backward compatibility
+  28. Old-format {"time": ..., "note": ...} target dict is accepted.
+  29. "note" field is mapped to expected_pitch.
+  30. Targets with only {"time": ...} are accepted.
+  31. exercise_from_dict rejects missing schema_version.
+  32. exercise_from_dict rejects missing bpm.
 """
 
 from __future__ import annotations
@@ -51,245 +61,312 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.exercise import Exercise, OnsetAdapterConfig, TrackerConfig
-from core.onset_adapter import OnsetAdapter
-from core.session_engine import SessionEngine
-from core.tempo_tracker import TempoTracker
-
-# ── Shared test data ──────────────────────────────────────────────────────────
-
-TARGETS_2 = [{"time": 1, "note": "E1"}, {"time": 2, "note": "A1"}]
-TARGETS_4 = [
-    {"time": 1, "note": "E1"},
-    {"time": 2, "note": "A1"},
-    {"time": 3, "note": "D2"},
-    {"time": 4, "note": "G2"},
-]
+from core.exercise import (
+    SCHEMA_VERSION,
+    Exercise,
+    Target,
+    exercise_from_dict,
+    exercise_from_json,
+    exercise_to_dict,
+    exercise_to_json,
+    simple_timing_exercise,
+    validate_exercise,
+)
 
 
-def _make_exercise(**overrides) -> Exercise:
-    defaults = dict(name="Test", bpm=120.0, count_in_beats=0, targets=TARGETS_4)
-    defaults.update(overrides)
-    return Exercise(**defaults)
+# ── Shared fixtures ───────────────────────────────────────────────────────────
+
+def _minimal_dict() -> dict:
+    """Smallest valid exercise dict."""
+    return {
+        "schema_version": 1,
+        "name": "Test exercise",
+        "bpm": 120.0,
+        "count_in_beats": 0,
+        "targets": [{"time": 1.0}, {"time": 2.0}],
+    }
+
+
+def _minimal_exercise() -> Exercise:
+    return exercise_from_dict(_minimal_dict())
 
 
 def _full_dict() -> dict:
     return {
-        "name":           "Four Quarter Notes",
-        "bpm":            120.0,
+        "schema_version": 1,
+        "name": "Full exercise",
+        "bpm": 100.0,
         "count_in_beats": 2,
-        "targets":        TARGETS_4,
-        "match_window_s": 0.25,
-        "onset": {
-            "min_rms":      0.020,
-            "min_peak":     0.10,
-            "refractory_s": 0.100,
-        },
-        "tracker": {
-            "phase_alpha":           0.05,
-            "tempo_beta":            0.20,
-            "outlier_threshold":     0.35,
-            "confidence_window":     6,
-            "drift_window":          3,
-            "drift_threshold_scale": 1.5,
-            "drift_min_frac":        0.08,
-        },
+        "targets": [
+            {
+                "time": 1.0,
+                "label": "root",
+                "expected_pitch": "E1",
+                "duration_beats": 0.5,
+                "metadata": {"difficulty": "easy"},
+            },
+            {
+                "time": 2.0,
+                "label": "fifth",
+                "expected_pitch": "B1",
+                "duration_beats": None,
+                "metadata": {},
+            },
+        ],
+        "description": "A two-beat exercise.",
+        "tags": ["beginner", "ii-V-I"],
+        "metadata": {"source": "manual", "author": "geb"},
     }
 
 
-# ── 1–2: Roundtrip ────────────────────────────────────────────────────────────
+# ── 1–3: Construction ─────────────────────────────────────────────────────────
 
-def test_roundtrip_equality():
-    data = _full_dict()
-    ex   = Exercise.from_dict(data)
-    ex2  = Exercise.from_dict(ex.to_dict())
+def test_minimal_exercise_valid():
+    ex = _minimal_exercise()
+    assert ex.name == "Test exercise"
+    assert ex.bpm  == pytest.approx(120.0)
+    assert len(ex.targets) == 2
+
+
+def test_simple_timing_exercise_constructs():
+    ex = simple_timing_exercise("Quarter notes", 120.0, 2, [1, 2, 3, 4])
+    assert ex.name == "Quarter notes"
+    assert len(ex.targets) == 4
+    assert ex.targets[0].time == pytest.approx(1.0)
+    assert ex.targets[3].time == pytest.approx(4.0)
+
+
+def test_simple_timing_exercise_schema_version():
+    ex = simple_timing_exercise("x", 120.0, 0, [1.0])
+    assert ex.schema_version == SCHEMA_VERSION
+
+
+# ── 4–7: JSON round trip ──────────────────────────────────────────────────────
+
+def test_json_roundtrip_minimal():
+    ex  = _minimal_exercise()
+    ex2 = exercise_from_json(exercise_to_json(ex))
+    assert ex2.name           == ex.name
+    assert ex2.bpm            == pytest.approx(ex.bpm)
+    assert ex2.count_in_beats == ex.count_in_beats
+    assert len(ex2.targets)   == len(ex.targets)
+    assert ex2.targets[0].time == pytest.approx(ex.targets[0].time)
+
+
+def test_json_roundtrip_preserves_description_tags_metadata():
+    ex  = exercise_from_dict(_full_dict())
+    ex2 = exercise_from_json(exercise_to_json(ex))
+    assert ex2.description == "A two-beat exercise."
+    assert ex2.tags        == ["beginner", "ii-V-I"]
+    assert ex2.metadata    == {"source": "manual", "author": "geb"}
+
+
+def test_json_roundtrip_preserves_target_fields():
+    ex  = exercise_from_dict(_full_dict())
+    ex2 = exercise_from_json(exercise_to_json(ex))
+    t   = ex2.targets[0]
+    assert t.label           == "root"
+    assert t.expected_pitch  == "E1"
+    assert t.duration_beats  == pytest.approx(0.5)
+    assert t.metadata        == {"difficulty": "easy"}
+
+
+def test_dict_roundtrip_equality():
+    ex  = exercise_from_dict(_full_dict())
+    ex2 = exercise_from_dict(exercise_to_dict(ex))
     assert ex == ex2
 
 
-def test_to_dict_is_json_serialisable():
-    ex = _make_exercise()
-    json.dumps(ex.to_dict())  # must not raise
+# ── 8–15: Exercise-level validation ──────────────────────────────────────────
+
+def test_schema_version_2_raises():
+    data = _minimal_dict()
+    data["schema_version"] = 2
+    with pytest.raises(ValueError, match="schema_version"):
+        exercise_from_dict(data)
 
 
-# ── 3–7: from_dict ────────────────────────────────────────────────────────────
-
-def test_from_dict_absent_onset_uses_defaults():
-    data = {"name": "x", "bpm": 100.0, "count_in_beats": 0, "targets": TARGETS_2}
-    ex   = Exercise.from_dict(data)
-    ref  = OnsetAdapterConfig()
-    assert ex.onset.min_rms      == ref.min_rms
-    assert ex.onset.min_peak     == ref.min_peak
-    assert ex.onset.refractory_s == ref.refractory_s
+def test_schema_version_0_raises():
+    data = _minimal_dict()
+    data["schema_version"] = 0
+    with pytest.raises(ValueError, match="schema_version"):
+        exercise_from_dict(data)
 
 
-def test_from_dict_absent_tracker_uses_defaults():
-    data = {"name": "x", "bpm": 100.0, "count_in_beats": 0, "targets": TARGETS_2}
-    ex   = Exercise.from_dict(data)
-    ref  = TrackerConfig()
-    assert ex.tracker.phase_alpha       == ref.phase_alpha
-    assert ex.tracker.tempo_beta        == ref.tempo_beta
-    assert ex.tracker.outlier_threshold == ref.outlier_threshold
+def test_empty_name_raises():
+    data = _minimal_dict()
+    data["name"] = ""
+    with pytest.raises(ValueError, match="name"):
+        exercise_from_dict(data)
 
 
-def test_from_dict_absent_match_window_is_none():
-    data = {"name": "x", "bpm": 120.0, "count_in_beats": 0, "targets": TARGETS_2}
-    ex   = Exercise.from_dict(data)
-    assert ex.match_window_s is None
+def test_whitespace_name_raises():
+    data = _minimal_dict()
+    data["name"] = "   "
+    with pytest.raises(ValueError, match="name"):
+        exercise_from_dict(data)
 
-
-def test_from_dict_present_match_window_preserved():
-    data = {"name": "x", "bpm": 120.0, "count_in_beats": 0,
-            "targets": TARGETS_2, "match_window_s": 0.20}
-    ex   = Exercise.from_dict(data)
-    assert ex.match_window_s == pytest.approx(0.20)
-
-
-def test_from_dict_partial_tracker_merges_with_defaults():
-    data = {"name": "x", "bpm": 100.0, "count_in_beats": 0, "targets": TARGETS_2,
-            "tracker": {"phase_alpha": 0.05, "tempo_beta": 0.15}}
-    ex   = Exercise.from_dict(data)
-    assert ex.tracker.phase_alpha == pytest.approx(0.05)
-    assert ex.tracker.tempo_beta  == pytest.approx(0.15)
-    assert ex.tracker.drift_window == TrackerConfig().drift_window  # default unchanged
-
-
-# ── 8–12: Conversion method contents ─────────────────────────────────────────
-
-def test_session_engine_kwargs_contains_core_fields():
-    ex     = _make_exercise()
-    kwargs = ex.to_session_engine_kwargs()
-    assert kwargs["targets"]        == ex.targets
-    assert kwargs["bpm"]            == ex.bpm
-    assert kwargs["count_in_beats"] == ex.count_in_beats
-
-
-def test_session_engine_kwargs_excludes_match_window_when_none():
-    ex = _make_exercise(match_window_s=None)
-    assert "match_window_s" not in ex.to_session_engine_kwargs()
-
-
-def test_session_engine_kwargs_includes_match_window_when_set():
-    ex = _make_exercise(match_window_s=0.30)
-    assert ex.to_session_engine_kwargs()["match_window_s"] == pytest.approx(0.30)
-
-
-def test_onset_adapter_kwargs_excludes_sample_rate():
-    ex     = _make_exercise()
-    kwargs = ex.to_onset_adapter_kwargs()
-    assert "sample_rate" not in kwargs
-    assert "min_rms"      in kwargs
-    assert "min_peak"     in kwargs
-    assert "refractory_s" in kwargs
-
-
-def test_tracker_kwargs_excludes_bpm():
-    ex     = _make_exercise()
-    kwargs = ex.to_tracker_kwargs()
-    assert "bpm"         not in kwargs
-    assert "nominal_bpm" not in kwargs
-    assert "phase_alpha" in kwargs
-
-
-# ── 13–16: Constructor compatibility ─────────────────────────────────────────
-
-def test_session_engine_constructs_from_exercise():
-    ex      = _make_exercise()
-    tracker = TempoTracker(ex.bpm, **ex.to_tracker_kwargs())
-    engine  = SessionEngine(**ex.to_session_engine_kwargs(), tracker=tracker)
-    assert engine.bpm == pytest.approx(ex.bpm)
-    assert len(engine.targets) == len(ex.targets)
-
-
-def test_onset_adapter_constructs_from_exercise():
-    ex      = _make_exercise()
-    adapter = OnsetAdapter(sample_rate=48000, **ex.to_onset_adapter_kwargs())
-    assert adapter.min_rms      == pytest.approx(ex.onset.min_rms)
-    assert adapter.min_peak     == pytest.approx(ex.onset.min_peak)
-    assert adapter.refractory_s == pytest.approx(ex.onset.refractory_s)
-
-
-def test_tempo_tracker_constructs_from_exercise():
-    ex      = _make_exercise()
-    tracker = TempoTracker(ex.bpm, **ex.to_tracker_kwargs())
-    assert tracker.nominal_beat_s == pytest.approx(60.0 / ex.bpm)
-
-
-def test_engine_from_exercise_with_explicit_match_window():
-    ex      = _make_exercise(match_window_s=0.20)
-    tracker = TempoTracker(ex.bpm, **ex.to_tracker_kwargs())
-    engine  = SessionEngine(**ex.to_session_engine_kwargs(), tracker=tracker)
-    assert engine.match_window_s == pytest.approx(0.20)
-
-
-# ── 17–23: Exercise validation ────────────────────────────────────────────────
 
 def test_bpm_zero_raises():
+    data = _minimal_dict()
+    data["bpm"] = 0.0
     with pytest.raises(ValueError, match="bpm"):
-        _make_exercise(bpm=0.0)
+        exercise_from_dict(data)
 
 
 def test_bpm_negative_raises():
+    data = _minimal_dict()
+    data["bpm"] = -60.0
     with pytest.raises(ValueError, match="bpm"):
-        _make_exercise(bpm=-1.0)
+        exercise_from_dict(data)
 
 
 def test_count_in_beats_negative_raises():
+    data = _minimal_dict()
+    data["count_in_beats"] = -1
     with pytest.raises(ValueError, match="count_in_beats"):
-        _make_exercise(count_in_beats=-1)
+        exercise_from_dict(data)
 
 
 def test_empty_targets_raises():
+    data = _minimal_dict()
+    data["targets"] = []
     with pytest.raises(ValueError, match="targets"):
-        _make_exercise(targets=[])
+        exercise_from_dict(data)
 
 
-def test_target_missing_time_key_raises():
-    with pytest.raises(ValueError, match="'time'"):
-        _make_exercise(targets=[{"note": "E1"}])
+# ── 16–21: Target-level validation ────────────────────────────────────────────
+
+def test_negative_target_time_raises():
+    data = _minimal_dict()
+    data["targets"] = [{"time": -0.5}]
+    with pytest.raises(ValueError, match="time"):
+        exercise_from_dict(data)
 
 
-def test_target_time_zero_raises():
-    with pytest.raises(ValueError, match="positive"):
-        _make_exercise(targets=[{"time": 0, "note": "E1"}])
+def test_unsorted_target_times_raises():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 2.0}, {"time": 1.0}]
+    with pytest.raises(ValueError, match="nondecreasing"):
+        exercise_from_dict(data)
 
 
-def test_target_time_negative_raises():
-    with pytest.raises(ValueError, match="positive"):
-        _make_exercise(targets=[{"time": -1, "note": "E1"}])
+def test_equal_target_times_allowed():
+    # Simultaneous notes — nondecreasing, not strictly increasing
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0}, {"time": 1.0}, {"time": 2.0}]
+    ex = exercise_from_dict(data)
+    assert ex.targets[0].time == pytest.approx(1.0)
+    assert ex.targets[1].time == pytest.approx(1.0)
 
 
-def test_non_increasing_target_times_raises():
-    with pytest.raises(ValueError, match="strictly increasing"):
-        _make_exercise(targets=[{"time": 2}, {"time": 1}])
+def test_duration_beats_zero_raises():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0, "duration_beats": 0.0}]
+    with pytest.raises(ValueError, match="duration_beats"):
+        exercise_from_dict(data)
 
 
-def test_equal_target_times_raises():
-    with pytest.raises(ValueError, match="strictly increasing"):
-        _make_exercise(targets=[{"time": 1}, {"time": 1}])
+def test_duration_beats_negative_raises():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0, "duration_beats": -0.5}]
+    with pytest.raises(ValueError, match="duration_beats"):
+        exercise_from_dict(data)
 
 
-def test_match_window_zero_raises():
-    with pytest.raises(ValueError, match="match_window_s"):
-        _make_exercise(match_window_s=0.0)
+def test_duration_beats_positive_is_valid():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0, "duration_beats": 0.5}]
+    ex = exercise_from_dict(data)
+    assert ex.targets[0].duration_beats == pytest.approx(0.5)
 
 
-def test_match_window_negative_raises():
-    with pytest.raises(ValueError, match="match_window_s"):
-        _make_exercise(match_window_s=-0.1)
+# ── 22–23: Metadata validation ────────────────────────────────────────────────
+
+def test_exercise_metadata_non_string_value_raises():
+    ex = Exercise(
+        schema_version=1,
+        name="x",
+        bpm=120.0,
+        count_in_beats=0,
+        targets=[Target(time=1.0)],
+        metadata={"key": 42},           # type: ignore[dict-item]
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        validate_exercise(ex)
 
 
-# ── 24–26: OnsetAdapterConfig validation ─────────────────────────────────────
+def test_target_metadata_non_string_value_raises():
+    ex = Exercise(
+        schema_version=1,
+        name="x",
+        bpm=120.0,
+        count_in_beats=0,
+        targets=[Target(time=1.0, metadata={"key": 3.14})],  # type: ignore[dict-item]
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        validate_exercise(ex)
 
-def test_onset_min_rms_negative_raises():
-    with pytest.raises(ValueError, match="min_rms"):
-        OnsetAdapterConfig(min_rms=-0.001)
+
+# ── 24–27: Field defaults and preservation ────────────────────────────────────
+
+def test_description_defaults_to_none():
+    ex = _minimal_exercise()
+    assert ex.description is None
 
 
-def test_onset_min_peak_negative_raises():
-    with pytest.raises(ValueError, match="min_peak"):
-        OnsetAdapterConfig(min_peak=-0.001)
+def test_tags_defaults_to_empty_list():
+    ex = _minimal_exercise()
+    assert ex.tags == []
 
 
-def test_onset_refractory_zero_raises():
-    with pytest.raises(ValueError, match="refractory_s"):
-        OnsetAdapterConfig(refractory_s=0.0)
+def test_metadata_defaults_to_empty_dict():
+    ex = _minimal_exercise()
+    assert ex.metadata == {}
+    assert ex.targets[0].metadata == {}
+
+
+def test_metadata_and_tags_preserved():
+    ex = exercise_from_dict(_full_dict())
+    assert ex.tags                    == ["beginner", "ii-V-I"]
+    assert ex.metadata["source"]      == "manual"
+    assert ex.targets[0].metadata["difficulty"] == "easy"
+
+
+# ── 28–32: Backward compatibility ────────────────────────────────────────────
+
+def test_old_format_note_field_accepted():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0, "note": "E1"}, {"time": 2.0, "note": "A1"}]
+    ex = exercise_from_dict(data)
+    assert len(ex.targets) == 2
+
+
+def test_old_format_note_mapped_to_expected_pitch():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0, "note": "E1"}]
+    ex = exercise_from_dict(data)
+    assert ex.targets[0].expected_pitch == "E1"
+
+
+def test_time_only_target_dict_accepted():
+    data = _minimal_dict()
+    data["targets"] = [{"time": 1.0}, {"time": 2.0}, {"time": 3.0}]
+    ex = exercise_from_dict(data)
+    assert len(ex.targets)           == 3
+    assert ex.targets[0].label       is None
+    assert ex.targets[0].expected_pitch is None
+
+
+def test_from_dict_missing_schema_version_raises():
+    data = _minimal_dict()
+    del data["schema_version"]
+    with pytest.raises(KeyError):
+        exercise_from_dict(data)
+
+
+def test_from_dict_missing_bpm_raises():
+    data = _minimal_dict()
+    del data["bpm"]
+    with pytest.raises(KeyError):
+        exercise_from_dict(data)

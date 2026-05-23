@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "audio_file": "tracks/eighth_notes_120.wav",
+  "alignment_method": "player_onsets",
+  "first_beat_time_sec": 1.0,
+  "last_beat_time_sec": 4.5,
+  "beat_count": 8,
+  "beats_per_bar": 4,
+  "confirmed_by_user": true,
+  "confidence": "fixture",
+  "metadata": {}
+}

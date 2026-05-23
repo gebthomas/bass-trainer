@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "Open String Pitches",
+  "bpm": 80.0,
+  "count_in_beats": 2,
+  "description": "Four targets with expected pitch values, one per open string.",
+  "tags": ["pitch", "open-strings", "beginner"],
+  "targets": [
+    {"time": 0, "label": "E string", "expected_pitch": "E2"},
+    {"time": 2, "label": "A string", "expected_pitch": "A2"},
+    {"time": 4, "label": "D string", "expected_pitch": "D3"},
+    {"time": 6, "label": "G string", "expected_pitch": "G3"}
+  ]
+}
