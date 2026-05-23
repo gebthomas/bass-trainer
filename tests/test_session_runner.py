@@ -88,7 +88,7 @@ def _metro_bundle() -> SessionBundle:
 
 
 # Alignment: first=2.0, last=5.0, beat_count=4 → period=1.0 s, bpm=60
-# target audio times (beats 0–3) → [2.0, 3.0, 4.0, 5.0]  |  window = 0.5 s
+# target audio times (beats 0–3) → [2.0, 3.0, 4.0, 5.0]  |  window = 0.35 s (clamped)
 def _alignment() -> BeatAlignment:
     return BeatAlignment(
         schema_version      = 1,
@@ -194,7 +194,7 @@ def test_empty_onset_stream_all_missed():
 # ── 5: recording_aligned happy path ──────────────────────────────────────────
 
 def test_recording_aligned_happy_path_all_hits():
-    # Target times: [2.0, 3.0, 4.0, 5.0]  window=0.5 s (bpm=60)
+    # Target times: [2.0, 3.0, 4.0, 5.0]  window=0.35 s (bpm=60, upper clamp)
     onsets = [2.05, 2.96, 4.03, 4.95]
     log = run_session_bundle(_aligned_bundle(), onsets, started_at=_STARTED)
 
