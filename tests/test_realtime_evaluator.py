@@ -230,9 +230,12 @@ def test_signal_below_threshold_no_onset():
     assert _eval(audio)["onset_found"] is False
 
 
-def test_signal_at_exactly_threshold_onset_found():
+def test_signal_at_exactly_threshold_sustained_not_onset():
+    # A constant signal at the absolute threshold is sustained resonance, not a new
+    # onset.  The dynamic threshold is max(0.02, 0.02 × 2.5) = 0.05; the constant
+    # signal never exceeds 0.05, so onset_found is False.
     audio = np.full(100, 0.02)
-    assert _eval(audio, onset_threshold=0.02)["onset_found"] is True
+    assert _eval(audio, onset_threshold=0.02)["onset_found"] is False
 
 
 def test_signal_just_below_threshold_no_onset():
@@ -346,3 +349,119 @@ def test_empty_stereo_works():
     assert out["detected"]    is False
     assert out["onset_found"] is False
     assert out["rms"]         == 0.0
+
+
+# ── Rise-based onset detection ────────────────────────────────────────────────
+#
+# These tests verify the key scenarios motivating the change from absolute-
+# threshold detection to baseline-relative detection.
+#
+# Test SR is 1000 Hz throughout so that timing in samples == timing in ms and
+# the baseline_window_s=0.015 s default covers exactly 15 samples.
+
+class TestRiseBasedOnset:
+    """Amplitude-rise detection: onset = rise above local baseline, not first
+    sample above an absolute floor."""
+
+    def test_silence_no_onset(self):
+        assert _eval(np.zeros(200))["onset_found"] is False
+
+    def test_clean_attack_from_silence_detected(self):
+        # Pre-roll of silence, single impulse at sample 50.
+        # baseline from samples 0–14 = 0; dyn_threshold = 0.02.
+        # abs(audio[50]) = 0.5 >= 0.02 → onset found at sample 50.
+        audio = np.zeros(200)
+        audio[50] = 0.5
+        result = _eval(audio)
+        assert result["onset_found"] is True
+        assert result["onset_sample"] == 50
+
+    def test_clean_step_attack_detected_at_rise(self):
+        # 30 samples of silence, then a step to 0.3 at sample 30.
+        # baseline = 0; dyn_threshold = 0.02; onset at sample 30.
+        audio = np.zeros(200)
+        audio[30:] = 0.3
+        result = _eval(audio)
+        assert result["onset_found"] is True
+        assert result["onset_sample"] == 30
+
+    def test_sustained_signal_above_floor_is_not_onset(self):
+        # A constant signal at 0.05 (above the 0.02 absolute floor) fills the
+        # entire window.  Old code would report onset_sample=0.  New code
+        # computes baseline ≈ 0.05, dyn_threshold = 0.125; signal never
+        # exceeds that → onset_found = False.
+        audio = np.full(200, 0.05)
+        assert _eval(audio)["onset_found"] is False
+
+    def test_sustained_louder_signal_is_not_onset(self):
+        # Even a loud constant signal (0.3) is not an onset.
+        audio = np.full(200, 0.3)
+        assert _eval(audio)["onset_found"] is False
+
+    def test_sustained_plus_new_attack_onset_at_attack_not_zero(self):
+        # First 60 samples: sustained resonance at 0.04 (above 0.02 floor).
+        # Samples 60 onward: loud new attack at 0.4.
+        # baseline ≈ 0.04; dyn_threshold = max(0.02, 0.10) = 0.10.
+        # onset at sample 60 (0.4 >= 0.10), NOT at sample 0.
+        audio = np.zeros(200)
+        audio[:60] = 0.04
+        audio[60:] = 0.4
+        result = _eval(audio)
+        assert result["onset_found"] is True
+        assert result["onset_sample"] >= 55   # never reports sample 0
+
+    def test_sustained_plus_attack_onset_near_attack_start(self):
+        # Same setup; onset should land at or very near the attack boundary.
+        audio = np.zeros(200)
+        audio[:60] = 0.04
+        audio[60:] = 0.4
+        result = _eval(audio)
+        assert result["onset_sample"] <= 65   # within a few samples of sample 60
+
+    def test_modest_rise_above_quiet_baseline_is_detected(self):
+        # Low-level background (0.005, below absolute floor) for first 20 samples,
+        # then silence until a modest attack at sample 60.
+        # baseline ≈ 0.005; dyn_threshold = max(0.02, 0.0125) = 0.02.
+        # attack = 0.06 >= 0.02 → detected.
+        audio = np.zeros(200)
+        audio[:20] = 0.005
+        audio[60:] = 0.06
+        result = _eval(audio)
+        assert result["onset_found"] is True
+        assert result["onset_sample"] >= 55
+
+    def test_onset_sample_is_none_when_no_rise(self):
+        audio = np.full(200, 0.04)
+        assert _eval(audio)["onset_sample"] is None
+
+    def test_onset_time_s_is_none_when_no_rise(self):
+        audio = np.full(200, 0.04)
+        assert _eval(audio)["onset_time_s"] is None
+
+    def test_rms_and_peak_unaffected_by_rise_logic(self):
+        # rms/peak are computed from the raw signal, independent of rise detection.
+        audio = np.full(200, 0.04)
+        result = _eval(audio)
+        assert abs(result["rms"]  - 0.04) < 1e-9
+        assert abs(result["peak"] - 0.04) < 1e-9
+        assert result["onset_found"] is False   # sustained, but rms/peak still valid
+
+    def test_custom_rise_ratio_tighter(self):
+        # With rise_ratio=1.5, the attack needs to be only 1.5× baseline.
+        # Sustained 0.04, attack at 0.07 (1.75× baseline) → detected.
+        audio = np.zeros(200)
+        audio[:30] = 0.04
+        audio[60:] = 0.07
+        result = _eval(audio, rise_ratio=1.5)
+        # dyn_threshold = max(0.02, 0.04×1.5) = 0.06; 0.07 >= 0.06 → onset found
+        assert result["onset_found"] is True
+        assert result["onset_sample"] >= 55
+
+    def test_custom_rise_ratio_looser_misses_weak_attack(self):
+        # With rise_ratio=10, only a very large rise is detected.
+        # Sustained 0.04, attack at 0.07 → NOT detected (0.07 < 0.04×10 = 0.40).
+        audio = np.zeros(200)
+        audio[:30] = 0.04
+        audio[60:] = 0.07
+        result = _eval(audio, rise_ratio=10.0)
+        assert result["onset_found"] is False

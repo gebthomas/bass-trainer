@@ -13,12 +13,17 @@ Run from the project root:
     python scripts/live_feedback_demo.py --adaptive-timing
     python scripts/live_feedback_demo.py --adaptive-timing --adaptive-window-shift 0.3
     python scripts/live_feedback_demo.py --adaptive-timing --max-window-shift-beats 0.25
+    python scripts/live_feedback_demo.py --bpm 80 --beats 8 --count-in 4
+    python scripts/live_feedback_demo.py --device MiniMe --bpm 60 --beats 16 --count-in 4
 
 Output format (fixed-grid):
     [t_now s] beat N  SEVERITY  ±XX ms  rms=...  peak=...  message
 
 Output format (adaptive timing):
     [t_now s] beat N  SEVERITY  ±XX ms  rms=...  peak=...  message  [bpm=61.2 win=−5ms]
+
+Output format (--debug-onsets, printed before each evaluation line):
+      → onset @4.230s  beat 0 @ 4.000s  err=+230ms  rms=0.0423  peak=0.1234
 """
 
 import argparse
@@ -178,6 +183,36 @@ def _play_count_in(bpm: float, count_in_beats: int, sample_rate: int) -> None:
 
 # ── Feedback formatting ───────────────────────────────────────────────────────
 
+def _format_onset_debug(
+    event: dict,
+    targets: list[dict],
+    count_in_s: float,
+    beat_s: float,
+) -> str | None:
+    """Return a debug line for a detected onset, or None if no onset in this window.
+
+    Reconstructs the absolute onset time as nominal_target_time + timing_error_s.
+    Only called when --debug-onsets is active; output is printed before the
+    normal evaluation line so the onset is visible before the verdict.
+    """
+    ev = event["evaluation"]
+    if not ev.get("onset_found"):
+        return None
+
+    idx           = event["target_index"]
+    target_time_s = count_in_s + targets[idx]["time"] * beat_s
+    timing_err_s  = event["timing_error_s"] or 0.0
+    onset_time_s  = target_time_s + timing_err_s
+
+    return (
+        f"  → onset @{onset_time_s:.3f}s"
+        f"  beat {idx} @ {target_time_s:.3f}s"
+        f"  err={timing_err_s * 1000:+.0f}ms"
+        f"  rms={ev['rms']:.4f}"
+        f"  peak={ev['peak']:.4f}"
+    )
+
+
 def _format_event(event: dict, t_now: float) -> str:
     idx    = event["target_index"]
     ev     = event["evaluation"]
@@ -196,6 +231,23 @@ def _format_event(event: dict, t_now: float) -> str:
         win_ms = event["window_shift_s"] * 1000
         line  += f"  [bpm={bpm:.1f} win={win_ms:+.0f}ms]"
     return line
+
+
+# ── WAV recording ─────────────────────────────────────────────────────────────
+
+def _float_to_int16(audio: np.ndarray) -> np.ndarray:
+    """Clip float64 audio to [-1, 1] and scale to int16."""
+    return (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+
+
+def _save_wav(path: str, audio: np.ndarray, sample_rate: int) -> None:
+    """Write a float64 mono array to a 16-bit WAV file using scipy."""
+    from pathlib import Path as _Path
+    from scipy.io import wavfile
+    _Path(path).parent.mkdir(parents=True, exist_ok=True)
+    wavfile.write(path, sample_rate, _float_to_int16(audio))
+    duration_s = len(audio) / sample_rate
+    print(f"Saved WAV: {path}  ({duration_s:.2f}s  {sample_rate} Hz  {len(audio)} samples)")
 
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
@@ -234,6 +286,30 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum window shift as a fraction of one beat (default 0.30). "
              "Only used with --adaptive-timing.",
     )
+    p.add_argument(
+        "--bpm", type=float, default=float(BPM),
+        metavar="BPM",
+        help=f"Tempo in beats per minute (default {BPM})",
+    )
+    p.add_argument(
+        "--beats", type=int, default=len(TARGETS),
+        metavar="N",
+        help=f"Number of targets, one per beat starting at beat 0 (default {len(TARGETS)})",
+    )
+    p.add_argument(
+        "--count-in", type=int, default=COUNT_IN, dest="count_in",
+        metavar="BEATS",
+        help=f"Count-in length in beats before the first target (default {COUNT_IN})",
+    )
+    p.add_argument(
+        "--debug-onsets", action="store_true",
+        help="Print each detected onset before its evaluation: time, nearest target, "
+             "signed error in ms, rms, peak",
+    )
+    p.add_argument(
+        "--record-wav", default=None, metavar="FILE", dest="record_wav",
+        help="Save the captured mono audio to a WAV file after the session ends",
+    )
     return p.parse_args()
 
 
@@ -254,13 +330,19 @@ def main() -> None:
     if args.level_check:
         _run_level_meter(device, sample_rate)
 
+    # ── Session parameters ────────────────────────────────────────────────────
+
+    bpm      = args.bpm
+    count_in = args.count_in
+    targets  = [{"time": i} for i in range(args.beats)]
+
     # ── Practice session ──────────────────────────────────────────────────────
 
-    session = PracticeSession(TARGETS, float(BPM), COUNT_IN, sample_rate)
+    session = PracticeSession(targets, bpm, count_in, sample_rate)
 
-    beat_s      = 60.0 / BPM
-    count_in_s  = COUNT_IN * beat_s
-    last_beat_s = count_in_s + max(t["time"] for t in TARGETS) * beat_s
+    beat_s      = 60.0 / bpm
+    count_in_s  = count_in * beat_s
+    last_beat_s = count_in_s + max(t["time"] for t in targets) * beat_s
     stop_s      = last_beat_s + 2.0
 
     max_samples = int(sample_rate * stop_s) + BLOCK_FRAMES
@@ -269,13 +351,13 @@ def main() -> None:
 
     # ── Adaptive timing setup ─────────────────────────────────────────────────
 
-    tracker            = TempoTracker(float(BPM)) if args.adaptive_timing else None
+    tracker            = TempoTracker(bpm) if args.adaptive_timing else None
     max_window_shift_s = args.max_window_shift_beats * beat_s if args.adaptive_timing else None
 
     # ── Header ────────────────────────────────────────────────────────────────
 
     click_label = "  (clicks disabled)" if args.no_click else ""
-    print(f"BPM {BPM}  |  count-in {COUNT_IN} beats  |  {len(TARGETS)} targets{click_label}")
+    print(f"BPM {bpm:.0f}  |  count-in {count_in} beats  |  {len(targets)} targets{click_label}")
     print(f"Count-in ends at {count_in_s:.1f}s — last target at {last_beat_s:.1f}s")
     if args.adaptive_timing:
         print(
@@ -294,7 +376,7 @@ def main() -> None:
             blocksize=BLOCK_FRAMES,
         ) as stream:
             if not args.no_click:
-                _play_count_in(float(BPM), COUNT_IN, sample_rate)
+                _play_count_in(bpm, count_in, sample_rate)
 
             while write_pos / sample_rate < stop_s:
                 raw, _overflowed = stream.read(BLOCK_FRAMES)
@@ -311,16 +393,23 @@ def main() -> None:
                     adaptive_window_shift=args.adaptive_window_shift,
                     max_window_shift_s=max_window_shift_s,
                 ):
+                    if args.debug_onsets:
+                        onset_line = _format_onset_debug(event, targets, count_in_s, beat_s)
+                        if onset_line:
+                            print(onset_line)
                     print(_format_event(event, t_now))
 
     except KeyboardInterrupt:
         print("\nStopped early.")
 
-    missed = set(range(len(TARGETS))) - session.evaluated_indices
+    missed = set(range(len(targets))) - session.evaluated_indices
     print(
-        f"\nEvaluated {len(session.evaluated_indices)}/{len(TARGETS)} targets."
+        f"\nEvaluated {len(session.evaluated_indices)}/{len(targets)} targets."
         + (f"  Not reached: beats {sorted(missed)}" if missed else "")
     )
+
+    if args.record_wav and write_pos > 0:
+        _save_wav(args.record_wav, buffer[:write_pos], sample_rate)
 
 
 if __name__ == "__main__":
