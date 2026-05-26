@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-05-26T00:46:50+00:00",
+  "ended_at": "2026-05-26T00:47:10+00:00",
+  "practice_mode_path": null,
+  "exercise_path": null,
+  "alignment_path": null,
+  "events": [
+    {
+      "time_sec": 2.72125,
+      "event_type": "target_hit",
+      "target_index": 0,
+      "message": null,
+      "value": 0.05458333333333333,
+      "metadata": {}
+    },
+    {
+      "time_sec": 3.3055624999999997,
+      "event_type": "target_hit",
+      "target_index": 1,
+      "message": null,
+      "value": -0.027770833333333335,
+      "metadata": {}
+    },
+    {
+      "time_sec": 4.062916666666666,
+      "event_type": "target_hit",
+      "target_index": 2,
+      "message": null,
+      "value": 0.06291666666666666,
+      "metadata": {}
+    },
+    {
+      "time_sec": 4.644104166666666,
+      "event_type": "target_hit",
+      "target_index": 3,
+      "message": null,
+      "value": -0.0225625,
+      "metadata": {}
+    },
+    {
+      "time_sec": 5.306916666666666,
+      "event_type": "target_hit",
+      "target_index": 4,
+      "message": null,
+      "value": -0.026416666666666668,
+      "metadata": {}
+    },
+    {
+      "time_sec": 6.036854166666667,
+      "event_type": "target_hit",
+      "target_index": 5,
+      "message": null,
+      "value": 0.03685416666666667,
+      "metadata": {}
+    },
+    {
+      "time_sec": 6.636666666666666,
+      "event_type": "target_hit",
+      "target_index": 6,
+      "message": null,
+      "value": -0.03,
+      "metadata": {}
+    },
+    {
+      "time_sec": 7.331312499999999,
+      "event_type": "target_hit",
+      "target_index": 7,
+      "message": null,
+      "value": -0.0020208333333333332,
+      "metadata": {}
+    },
+    {
+      "time_sec": 7.9828125,
+      "event_type": "target_hit",
+      "target_index": 8,
+      "message": null,
+      "value": -0.0171875,
+      "metadata": {}
+    },
+    {
+      "time_sec": 8.657791666666666,
+      "event_type": "target_hit",
+      "target_index": 9,
+      "message": null,
+      "value": -0.008875,
+      "metadata": {}
+    },
+    {
+      "time_sec": 9.303937499999998,
+      "event_type": "target_hit",
+      "target_index": 10,
+      "message": null,
+      "value": -0.029395833333333333,
+      "metadata": {}
+    },
+    {
+      "time_sec": 10.072208333333334,
+      "event_type": "target_hit",
+      "target_index": 11,
+      "message": null,
+      "value": 0.07220833333333333,
+      "metadata": {}
+    },
+    {
+      "time_sec": 10.742208333333332,
+      "event_type": "target_hit",
+      "target_index": 12,
+      "message": null,
+      "value": 0.07554166666666666,
+      "metadata": {}
+    },
+    {
+      "time_sec": 11.416145833333331,
+      "event_type": "target_hit",
+      "target_index": 13,
+      "message": null,
+      "value": 0.0828125,
+      "metadata": {}
+    },
+    {
+      "time_sec": 12.045541666666665,
+      "event_type": "target_hit",
+      "target_index": 14,
+      "message": null,
+      "value": 0.04554166666666667,
+      "metadata": {}
+    },
+    {
+      "time_sec": 12.704520833333333,
+      "event_type": "target_hit",
+      "target_index": 15,
+      "message": null,
+      "value": 0.03785416666666667,
+      "metadata": {}
+    },
+    {
+      "time_sec": 13.310541666666666,
+      "event_type": "target_hit",
+      "target_index": 16,
+      "message": null,
+      "value": -0.022791666666666665,
+      "metadata": {}
+    },
+    {
+      "time_sec": 14.082416666666665,
+      "event_type": "target_hit",
+      "target_index": 17,
+      "message": null,
+      "value": 0.08241666666666667,
+      "metadata": {}
+    },
+    {
+      "time_sec": 14.742354166666667,
+      "event_type": "target_hit",
+      "target_index": 18,
+      "message": null,
+      "value": 0.0756875,
+      "metadata": {}
+    },
+    {
+      "time_sec": 15.411666666666665,
+      "event_type": "target_hit",
+      "target_index": 19,
+      "message": null,
+      "value": 0.07833333333333334,
+      "metadata": {}
+    },
+    {
+      "time_sec": 16.015124999999998,
+      "event_type": "target_hit",
+      "target_index": 20,
+      "message": null,
+      "value": 0.015125,
+      "metadata": {}
+    },
+    {
+      "time_sec": 16.636666666666667,
+      "event_type": "target_hit",
+      "target_index": 21,
+      "message": null,
+      "value": -0.03,
+      "metadata": {}
+    },
+    {
+      "time_sec": 17.422104166666667,
+      "event_type": "target_hit",
+      "target_index": 22,
+      "message": null,
+      "value": 0.08877083333333333,
+      "metadata": {}
+    },
+    {
+      "time_sec": 18.0,
+      "event_type": "target_miss",
+      "target_index": 23,
+      "message": null,
+      "value": null,
+      "metadata": {}
+    }
+  ],
+  "metrics": {
+    "targets_total": 24,
+    "targets_hit": 23,
+    "targets_missed": 1,
+    "extra_onsets": 0,
+    "good_hits": 14,
+    "warn_hits": 9,
+    "miss_severity_events": 1,
+    "mean_signed_error_s": 0.02572282608695652,
+    "mean_abs_error_s": 0.044594202898550726
+  },
+  "metadata": {
+    "bpm": "90.0",
+    "count_in": "4",
+    "beats": "24",
+    "device": "Apogee MiniMe",
+    "detector": "live_rise_based"
+  }
+}
