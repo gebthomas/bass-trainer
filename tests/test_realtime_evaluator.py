@@ -1,467 +1,468 @@
-"""Tests for core/realtime_evaluator.py — synthetic signals, no audio hardware."""
+"""Tests for core/realtime_evaluator — deterministic timing evaluation.
+
+All tests use synthetic timestamp data; no audio hardware required.
+
+Conventions
+-----------
+- Times in seconds; errors in milliseconds.
+- Positive signed_error_ms → onset arrived late.
+- Negative signed_error_ms → onset arrived early.
+- Default tolerance_s      = 0.08 s (80 ms).
+- Default on_time threshold = 0.03 s (30 ms).
+"""
+
+from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-import numpy as np
-import numpy.testing as npt
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.realtime_evaluator import evaluate_window
+from core.realtime_evaluator import TargetEvaluation, evaluate_targets
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-_SR = 1000   # 1 kHz — keeps timing math simple (onset_sample / 1000 = seconds)
+_TOL = 0.08   # default tolerance (seconds)
+_OT  = 0.03   # default on_time threshold (seconds)
 
 
-def _eval(audio, sr=_SR, **kw):
-    return evaluate_window(audio, sr, **kw)
+def _eval(targets, onsets, tolerance_s=_TOL, on_time_threshold_s=_OT):
+    return evaluate_targets(
+        targets, onsets,
+        tolerance_s=tolerance_s,
+        on_time_threshold_s=on_time_threshold_s,
+    )
+
+
+def _single(targets, onsets, **kw):
+    """Evaluate and assert exactly one result is returned."""
+    results = _eval(targets, onsets, **kw)
+    assert len(results) == 1
+    return results[0]
+
+
+# ── TargetEvaluation dataclass ────────────────────────────────────────────────
+
+class TestTargetEvaluationDataclass:
+    def test_all_fields_present(self):
+        te = TargetEvaluation(
+            target_index=0,
+            expected_time_s=1.0,
+            actual_time_s=1.01,
+            signed_error_ms=10.0,
+            classification="on_time",
+            matched_onset_index=0,
+        )
+        assert te.target_index        == 0
+        assert te.expected_time_s     == 1.0
+        assert te.actual_time_s       == 1.01
+        assert te.signed_error_ms     == 10.0
+        assert te.classification      == "on_time"
+        assert te.matched_onset_index == 0
+
+    def test_miss_fields_are_none(self):
+        te = TargetEvaluation(
+            target_index=0,
+            expected_time_s=1.0,
+            actual_time_s=None,
+            signed_error_ms=None,
+            classification="miss",
+            matched_onset_index=None,
+        )
+        assert te.actual_time_s       is None
+        assert te.signed_error_ms     is None
+        assert te.matched_onset_index is None
+
+    def test_is_immutable(self):
+        te = TargetEvaluation(0, 1.0, 1.0, 0.0, "on_time", 0)
+        with pytest.raises(Exception):
+            te.target_index = 99   # frozen dataclass raises
+
+
+# ── Empty inputs ──────────────────────────────────────────────────────────────
+
+class TestEmptyInputs:
+    def test_empty_targets_returns_empty_list(self):
+        assert _eval([], [0.5, 1.0]) == []
+
+    def test_empty_onsets_all_misses(self):
+        results = _eval([1.0, 2.0, 3.0], [])
+        assert len(results) == 3
+        assert all(r.classification == "miss" for r in results)
+
+    def test_both_empty_returns_empty(self):
+        assert _eval([], []) == []
+
+    def test_empty_onsets_miss_fields_are_none(self):
+        r = _single([1.0], [])
+        assert r.actual_time_s       is None
+        assert r.signed_error_ms     is None
+        assert r.matched_onset_index is None
 
 
 # ── Return structure ──────────────────────────────────────────────────────────
 
-def test_return_keys_present():
-    out = _eval(np.zeros(100))
-    for k in ("detected", "rms", "peak", "onset_found", "onset_sample", "onset_time_s"):
-        assert k in out, f"missing key: {k!r}"
+class TestReturnStructure:
+    def test_returns_list_of_target_evaluations(self):
+        results = _eval([1.0], [1.0])
+        assert isinstance(results, list)
+        assert all(isinstance(r, TargetEvaluation) for r in results)
 
+    def test_result_count_matches_target_count(self):
+        assert len(_eval([1.0, 2.0, 3.0, 4.0], [1.0, 2.0, 3.0, 4.0])) == 4
 
-def test_detected_is_bool():
-    assert type(_eval(np.zeros(100))["detected"]) is bool
+    def test_target_index_matches_position(self):
+        results = _eval([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+        for i, r in enumerate(results):
+            assert r.target_index == i
 
+    def test_expected_time_s_matches_input(self):
+        targets = [0.5, 1.5, 2.5]
+        results = _eval(targets, [0.5, 1.5, 2.5])
+        for r in results:
+            assert r.expected_time_s == targets[r.target_index]
 
-def test_rms_is_float():
-    assert type(_eval(np.zeros(100))["rms"]) is float
+    def test_classification_is_valid_string(self):
+        valid = {"on_time", "early", "late", "miss"}
+        results = _eval([1.0, 2.0], [1.0, 99.0])
+        for r in results:
+            assert r.classification in valid
 
 
-def test_peak_is_float():
-    assert type(_eval(np.zeros(100))["peak"]) is float
+# ── Perfect timing ────────────────────────────────────────────────────────────
 
+class TestPerfectTiming:
+    def test_exact_match_is_on_time(self):
+        assert _single([1.0], [1.0]).classification == "on_time"
 
-def test_onset_found_is_bool():
-    assert type(_eval(np.zeros(100))["onset_found"]) is bool
+    def test_exact_match_zero_error(self):
+        assert _single([1.0], [1.0]).signed_error_ms == pytest.approx(0.0)
 
+    def test_exact_match_actual_time_set(self):
+        assert _single([1.0], [1.0]).actual_time_s == pytest.approx(1.0)
 
-def test_onset_sample_is_int_or_none():
-    out = _eval(np.zeros(100))
-    assert out["onset_sample"] is None or type(out["onset_sample"]) is int
+    def test_exact_match_onset_index_set(self):
+        assert _single([1.0], [1.0]).matched_onset_index == 0
 
+    def test_within_on_time_threshold_is_on_time(self):
+        # 20 ms late < 30 ms threshold → on_time
+        assert _single([1.0], [1.020]).classification == "on_time"
 
-def test_onset_sample_is_int_when_found():
-    audio = np.zeros(100)
-    audio[10] = 1.0
-    assert type(_eval(audio)["onset_sample"]) is int
+    def test_multiple_exact_matches_all_on_time(self):
+        results = _eval([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+        assert all(r.classification == "on_time" for r in results)
 
 
-def test_onset_time_s_is_float_when_found():
-    audio = np.zeros(100)
-    audio[10] = 1.0
-    assert type(_eval(audio)["onset_time_s"]) is float
+# ── Early hits ────────────────────────────────────────────────────────────────
 
+class TestEarlyHits:
+    def test_early_within_threshold_is_on_time(self):
+        # 20 ms early < 30 ms threshold → on_time
+        assert _single([1.0], [0.980]).classification == "on_time"
 
-# ── Silence ───────────────────────────────────────────────────────────────────
+    def test_early_beyond_threshold_is_early(self):
+        # 50 ms early > 30 ms threshold → early
+        assert _single([1.0], [0.950]).classification == "early"
 
-def test_silence_detected_false():
-    assert _eval(np.zeros(100))["detected"] is False
+    def test_early_signed_error_is_negative(self):
+        r = _single([1.0], [0.950])
+        assert r.signed_error_ms == pytest.approx(-50.0)
 
+    def test_early_within_tolerance_matched(self):
+        # 70 ms early, tolerance 80 ms → matched as early
+        r = _single([1.0], [0.930], tolerance_s=0.08)
+        assert r.classification == "early"
+        assert r.actual_time_s  == pytest.approx(0.930)
 
-def test_silence_rms_zero():
-    assert _eval(np.zeros(100))["rms"] == 0.0
+    def test_early_outside_tolerance_is_miss(self):
+        # 90 ms early, tolerance 80 ms → miss
+        assert _single([1.0], [0.910], tolerance_s=0.08).classification == "miss"
 
 
-def test_silence_peak_zero():
-    assert _eval(np.zeros(100))["peak"] == 0.0
+# ── Late hits ─────────────────────────────────────────────────────────────────
 
+class TestLateHits:
+    def test_late_within_threshold_is_on_time(self):
+        # 20 ms late < 30 ms threshold → on_time
+        assert _single([1.0], [1.020]).classification == "on_time"
 
-def test_silence_onset_not_found():
-    assert _eval(np.zeros(100))["onset_found"] is False
+    def test_late_beyond_threshold_is_late(self):
+        # 50 ms late > 30 ms threshold → late
+        assert _single([1.0], [1.050]).classification == "late"
 
+    def test_late_signed_error_is_positive(self):
+        r = _single([1.0], [1.050])
+        assert r.signed_error_ms == pytest.approx(50.0)
 
-def test_silence_onset_sample_none():
-    assert _eval(np.zeros(100))["onset_sample"] is None
+    def test_late_within_tolerance_matched(self):
+        r = _single([1.0], [1.070], tolerance_s=0.08)
+        assert r.classification == "late"
+        assert r.actual_time_s  == pytest.approx(1.070)
 
+    def test_late_outside_tolerance_is_miss(self):
+        # 90 ms late, tolerance 80 ms → miss
+        assert _single([1.0], [1.090], tolerance_s=0.08).classification == "miss"
 
-def test_silence_onset_time_none():
-    assert _eval(np.zeros(100))["onset_time_s"] is None
 
+# ── Misses ────────────────────────────────────────────────────────────────────
 
-# ── RMS computation ───────────────────────────────────────────────────────────
+class TestMisses:
+    def test_no_onset_is_miss(self):
+        assert _single([1.0], []).classification == "miss"
 
-def test_rms_constant_signal():
-    # RMS of a constant value c is c.
-    audio = np.full(200, 0.3)
-    assert abs(_eval(audio)["rms"] - 0.3) < 1e-9
+    def test_onset_outside_window_is_miss(self):
+        assert _single([1.0], [2.0]).classification == "miss"
 
+    def test_miss_actual_time_is_none(self):
+        assert _single([1.0], []).actual_time_s is None
 
-def test_rms_known_mixed_signal():
-    # [0.0, 0.0, 1.0, 0.0]: mean(x^2) = 1/4 → rms = 0.5
-    audio = np.array([0.0, 0.0, 1.0, 0.0])
-    assert abs(_eval(audio)["rms"] - 0.5) < 1e-9
+    def test_miss_signed_error_is_none(self):
+        assert _single([1.0], []).signed_error_ms is None
 
+    def test_miss_onset_index_is_none(self):
+        assert _single([1.0], []).matched_onset_index is None
 
-def test_rms_with_negative_values():
-    # [-0.4, 0.4]: mean(x^2) = 0.16 → rms = 0.4
-    audio = np.array([-0.4, 0.4])
-    assert abs(_eval(audio)["rms"] - 0.4) < 1e-9
+    def test_all_misses_without_onsets(self):
+        results = _eval([1.0, 2.0, 3.0], [])
+        assert all(r.classification == "miss" for r in results)
 
+    def test_first_hit_second_miss(self):
+        results = _eval([1.0, 2.0], [1.0])
+        assert results[0].classification == "on_time"
+        assert results[1].classification == "miss"
 
-# ── Peak amplitude ────────────────────────────────────────────────────────────
 
-def test_peak_positive_signal():
-    assert abs(_eval(np.full(50, 0.7))["peak"] - 0.7) < 1e-9
+# ── Tolerance boundaries ──────────────────────────────────────────────────────
 
+class TestToleranceBoundaries:
+    def test_onset_at_right_boundary_is_matched(self):
+        # tolerance_s = 0.25 = 1/4, exact in float64.
+        # 1.0 + 0.25 = 1.25, also exact.  abs(1.25 - 1.0) = 0.25 = tolerance_s → matched.
+        r = _single([1.0], [1.25], tolerance_s=0.25)
+        assert r.classification != "miss"
 
-def test_peak_uses_absolute_value():
-    # Negative amplitude counts toward peak.
-    audio = np.array([0.2, -0.9, 0.1])
-    assert abs(_eval(audio)["peak"] - 0.9) < 1e-9
+    def test_onset_at_left_boundary_is_matched(self):
+        r = _single([1.0], [0.75], tolerance_s=0.25)
+        assert r.classification != "miss"
 
+    def test_onset_just_outside_right_boundary_is_miss(self):
+        # 90 ms > 80 ms tolerance → miss
+        r = _single([1.0], [1.09], tolerance_s=0.08)
+        assert r.classification == "miss"
 
-def test_peak_mixed_sign():
-    audio = np.array([0.6, -0.3, 0.4])
-    assert abs(_eval(audio)["peak"] - 0.6) < 1e-9
+    def test_onset_just_outside_left_boundary_is_miss(self):
+        r = _single([1.0], [0.91], tolerance_s=0.08)
+        assert r.classification == "miss"
 
 
-# ── Detection (rms vs min_rms) ────────────────────────────────────────────────
+# ── On-time threshold boundaries ──────────────────────────────────────────────
+
+class TestOnTimeThresholdBoundaries:
+    def test_error_exactly_at_threshold_is_on_time(self):
+        # on_time_threshold_s = 0.0625 = 1/16, exact in float64.
+        # onset at 1.0625 → signed_error_ms = 62.5 exactly = threshold → on_time.
+        r = _single([1.0], [1.0625], on_time_threshold_s=0.0625)
+        assert r.classification == "on_time"
 
-def test_detected_true_when_rms_above_min():
-    audio = np.full(100, 0.1)   # rms=0.1 > default min_rms=0.005
-    assert _eval(audio)["detected"] is True
+    def test_error_just_above_threshold_is_late(self):
+        # 70 ms late > 30 ms default threshold → late
+        r = _single([1.0], [1.070], on_time_threshold_s=0.03)
+        assert r.classification == "late"
 
+    def test_negative_error_exactly_at_threshold_is_on_time(self):
+        r = _single([1.0], [0.9375], on_time_threshold_s=0.0625)
+        assert r.classification == "on_time"
+
+    def test_negative_error_just_below_threshold_is_early(self):
+        # 70 ms early > 30 ms default threshold → early
+        r = _single([1.0], [0.930], on_time_threshold_s=0.03)
+        assert r.classification == "early"
 
-def test_detected_false_when_rms_below_min():
-    audio = np.full(100, 0.001)   # rms=0.001 < 0.005
-    assert _eval(audio)["detected"] is False
 
+# ── Duplicate onset prevention ────────────────────────────────────────────────
 
-def test_detected_true_at_exact_min_rms():
-    audio = np.full(100, 0.005)   # rms == min_rms → True (>=)
-    assert _eval(audio, min_rms=0.005)["detected"] is True
+class TestDuplicateOnsetPrevention:
+    def test_one_onset_matches_only_one_target(self):
+        # Single onset near two targets; first target (left to right) claims it.
+        results = _eval([1.0, 1.05], [1.0])
+        assert results[0].classification == "on_time"
+        assert results[1].classification == "miss"
 
+    def test_each_onset_used_at_most_once(self):
+        # 3 targets, 2 onsets → third target misses
+        results = _eval([1.0, 2.0, 3.0], [1.0, 2.0])
+        assert results[0].classification == "on_time"
+        assert results[1].classification == "on_time"
+        assert results[2].classification == "miss"
 
-def test_detected_false_just_below_min_rms():
-    audio = np.full(100, 0.00499)
-    assert _eval(audio, min_rms=0.005)["detected"] is False
+    def test_double_hit_nearest_wins(self):
+        # Two onsets both inside tolerance; target at 1.0.
+        # Onset at 0.970 (30 ms early) vs onset at 1.020 (20 ms late) → 1.020 is closer.
+        r = _single([1.0], [0.970, 1.020])
+        assert r.actual_time_s == pytest.approx(1.020)
 
+    def test_consumed_onset_not_reused_by_later_target(self):
+        # Both onsets are near target 0; target 1 at 1.5 s gets nothing.
+        results = _eval([1.0, 1.5], [0.970, 1.020])
+        assert results[0].matched_onset_index is not None
+        assert results[1].classification == "miss"
 
-def test_detected_independent_of_onset():
-    # High peak but very low RMS (single spike in long silence) → detected=False, onset=True
-    audio = np.zeros(1000)
-    audio[10] = 0.5   # rms = 0.5/sqrt(1000) ≈ 0.0158 ... actually let's check
-    # rms = sqrt(0.25/1000) = sqrt(0.00025) ≈ 0.01581 > 0.005 → detected=True
-    # Use a longer array to keep rms below min_rms:
-    audio = np.zeros(10_000)
-    audio[10] = 0.5   # rms = sqrt(0.25/10000) = sqrt(0.000025) = 0.005 — exactly min_rms
-    audio = np.zeros(10_001)
-    audio[10] = 0.5   # rms < 0.005
-    out = _eval(audio)
-    assert out["detected"] is False
-    assert out["onset_found"] is True
 
+# ── Nearest-onset selection ───────────────────────────────────────────────────
 
-# ── Impulse onset ─────────────────────────────────────────────────────────────
+class TestNearestOnsetSelection:
+    def test_nearest_onset_selected(self):
+        # Target 1.0; onsets at 0.960 (40 ms) and 1.010 (10 ms) → 1.010 wins.
+        r = _single([1.0], [0.960, 1.010])
+        assert r.actual_time_s == pytest.approx(1.010)
 
-def test_impulse_at_sample_zero_onset_found():
-    audio = np.zeros(100)
-    audio[0] = 1.0
-    assert _eval(audio)["onset_found"] is True
+    def test_nearest_onset_index_reported(self):
+        # Onset 0 at 0.96, onset 1 at 1.01 → nearest is index 1.
+        r = _single([1.0], [0.960, 1.010])
+        assert r.matched_onset_index == 1
 
+    def test_three_candidates_nearest_chosen(self):
+        # Onsets at 0.930 (70 ms), 0.970 (30 ms), 1.040 (40 ms) → 0.970 wins.
+        r = _single([1.0], [0.930, 0.970, 1.040])
+        assert r.actual_time_s == pytest.approx(0.970)
 
-def test_impulse_at_sample_zero_onset_sample():
-    audio = np.zeros(100)
-    audio[0] = 1.0
-    assert _eval(audio)["onset_sample"] == 0
+    def test_equidistant_onsets_earlier_wins(self):
+        # Onset A at 0.970 (−30 ms) and onset B at 1.030 (+30 ms) — equal distance.
+        # Sorted order puts A first → A wins the tie.
+        r = _single([1.0], [0.970, 1.030])
+        assert r.actual_time_s == pytest.approx(0.970)
 
 
-def test_impulse_at_sample_zero_onset_time():
-    audio = np.zeros(100)
-    audio[0] = 1.0
-    assert _eval(audio)["onset_time_s"] == 0.0
+# ── Out-of-order onset input ──────────────────────────────────────────────────
 
+class TestOutOfOrderInput:
+    def test_unsorted_onsets_same_classifications_as_sorted(self):
+        targets          = [1.0, 2.0, 3.0]
+        onsets_sorted    = [1.01, 1.98, 3.02]
+        onsets_unsorted  = [3.02, 1.01, 1.98]
+        r_sorted    = _eval(targets, onsets_sorted)
+        r_unsorted  = _eval(targets, onsets_unsorted)
+        for s, u in zip(r_sorted, r_unsorted):
+            assert s.classification == u.classification
+
+    def test_reversed_onsets_both_targets_matched(self):
+        results = _eval([1.0, 2.0], [2.0, 1.0])
+        assert results[0].classification != "miss"
+        assert results[1].classification != "miss"
 
-def test_impulse_onset_sample_value():
-    audio = np.zeros(100)
-    audio[42] = 1.0
-    assert _eval(audio)["onset_sample"] == 42
+    def test_unsorted_onset_times_match_correctly(self):
+        # Onset 0 at 2.01 (near target 1), onset 1 at 1.01 (near target 0).
+        # After sorting: [(1, 1.01), (0, 2.01)].
+        results = _eval([1.0, 2.0], [2.01, 1.01])
+        assert results[0].actual_time_s == pytest.approx(1.01)
+        assert results[1].actual_time_s == pytest.approx(2.01)
 
 
-def test_impulse_onset_time_s():
-    audio = np.zeros(100)
-    audio[42] = 1.0
-    # SR=1000: 42 / 1000 = 0.042
-    assert abs(_eval(audio)["onset_time_s"] - 0.042) < 1e-9
+# ── Deterministic behavior ────────────────────────────────────────────────────
 
-
-# ── Delayed onset ─────────────────────────────────────────────────────────────
-
-def test_delayed_onset_found():
-    audio = np.zeros(500)
-    audio[200] = 0.5
-    assert _eval(audio)["onset_found"] is True
-
-
-def test_delayed_onset_sample():
-    audio = np.zeros(500)
-    audio[200] = 0.5
-    assert _eval(audio)["onset_sample"] == 200
-
-
-def test_delayed_onset_time_s():
-    audio = np.zeros(500)
-    audio[200] = 0.5
-    assert abs(_eval(audio)["onset_time_s"] - 0.2) < 1e-9
-
-
-def test_first_crossing_used_not_last():
-    # Two crossings: first at 30, second at 70 — onset_sample must be 30.
-    audio = np.zeros(100)
-    audio[30] = 0.5
-    audio[70] = 0.8
-    assert _eval(audio)["onset_sample"] == 30
-
-
-# ── Onset threshold ───────────────────────────────────────────────────────────
-
-def test_signal_below_threshold_no_onset():
-    audio = np.full(100, 0.01)   # 0.01 < default 0.02
-    assert _eval(audio)["onset_found"] is False
-
-
-def test_signal_at_exactly_threshold_sustained_not_onset():
-    # A constant signal at the absolute threshold is sustained resonance, not a new
-    # onset.  The dynamic threshold is max(0.02, 0.02 × 2.5) = 0.05; the constant
-    # signal never exceeds 0.05, so onset_found is False.
-    audio = np.full(100, 0.02)
-    assert _eval(audio, onset_threshold=0.02)["onset_found"] is False
-
-
-def test_signal_just_below_threshold_no_onset():
-    audio = np.full(100, 0.0199)
-    assert _eval(audio, onset_threshold=0.02)["onset_found"] is False
-
-
-def test_custom_threshold_respected():
-    audio = np.full(100, 0.1)
-    # With high threshold, no onset found.
-    assert _eval(audio, onset_threshold=0.5)["onset_found"] is False
-
-
-# ── Stereo input ──────────────────────────────────────────────────────────────
-
-def test_stereo_detected_consistent_with_mono_mean():
-    audio = np.zeros((100, 2))
-    audio[10, 0] = 0.6
-    audio[10, 1] = 0.4
-    # Mono mean at sample 10 = 0.5 → onset found
-    out = _eval(audio)
-    assert out["onset_found"] is True
-    assert out["onset_sample"] == 10
-
-
-def test_stereo_onset_sample_matches_mono_average():
-    stereo = np.zeros((200, 2))
-    stereo[50, 0] = 0.8
-    stereo[50, 1] = 0.6
-    mono_avg = stereo.mean(axis=1)
-    out_stereo = _eval(stereo)
-    out_mono   = _eval(mono_avg)
-    assert out_stereo["onset_sample"] == out_mono["onset_sample"]
-    assert abs(out_stereo["rms"]  - out_mono["rms"])  < 1e-9
-    assert abs(out_stereo["peak"] - out_mono["peak"]) < 1e-9
-
-
-def test_stereo_channel_average_for_rms():
-    # Channel 0: [1.0, 1.0], Channel 1: [0.0, 0.0] → mono = [0.5, 0.5] → rms = 0.5
-    audio = np.array([[1.0, 0.0], [1.0, 0.0]])
-    assert abs(_eval(audio)["rms"] - 0.5) < 1e-9
-
-
-def test_stereo_equal_channels_same_as_mono():
-    n = 200
-    signal = np.random.default_rng(42).uniform(-0.3, 0.3, n)
-    mono   = signal
-    stereo = np.column_stack([signal, signal])
-    out_m  = _eval(mono)
-    out_s  = _eval(stereo)
-    assert abs(out_m["rms"]  - out_s["rms"])  < 1e-9
-    assert abs(out_m["peak"] - out_s["peak"]) < 1e-9
-    assert out_m["onset_sample"] == out_s["onset_sample"]
-
-
-def test_stereo_onset_below_threshold_when_averaged():
-    # Each channel alone would exceed threshold, but average does not.
-    audio = np.zeros((100, 2))
-    audio[10, 0] =  0.03
-    audio[10, 1] = -0.03
-    # mean at sample 10 = 0.0 → no onset
-    out = _eval(audio, onset_threshold=0.02)
-    assert out["onset_found"] is False
-
-
-# ── Low-energy signal ─────────────────────────────────────────────────────────
-
-def test_low_energy_not_detected():
-    audio = np.full(100, 0.001)   # rms = 0.001 < 0.005
-    assert _eval(audio)["detected"] is False
-
-
-def test_low_energy_rms_returned():
-    audio = np.full(100, 0.001)
-    assert abs(_eval(audio)["rms"] - 0.001) < 1e-9
-
-
-def test_low_energy_no_onset_below_threshold():
-    audio = np.full(100, 0.001)   # 0.001 < 0.02 onset_threshold
-    assert _eval(audio)["onset_found"] is False
-
-
-# ── Empty input ───────────────────────────────────────────────────────────────
-
-def test_empty_detected_false():
-    assert _eval(np.array([]))["detected"] is False
-
-
-def test_empty_rms_zero():
-    assert _eval(np.array([]))["rms"] == 0.0
-
-
-def test_empty_peak_zero():
-    assert _eval(np.array([]))["peak"] == 0.0
-
-
-def test_empty_onset_not_found():
-    assert _eval(np.array([]))["onset_found"] is False
-
-
-def test_empty_onset_sample_none():
-    assert _eval(np.array([]))["onset_sample"] is None
-
-
-def test_empty_onset_time_none():
-    assert _eval(np.array([]))["onset_time_s"] is None
-
-
-def test_empty_stereo_works():
-    out = _eval(np.zeros((0, 2)))
-    assert out["detected"]    is False
-    assert out["onset_found"] is False
-    assert out["rms"]         == 0.0
-
-
-# ── Rise-based onset detection ────────────────────────────────────────────────
-#
-# These tests verify the key scenarios motivating the change from absolute-
-# threshold detection to baseline-relative detection.
-#
-# Test SR is 1000 Hz throughout so that timing in samples == timing in ms and
-# the baseline_window_s=0.015 s default covers exactly 15 samples.
-
-class TestRiseBasedOnset:
-    """Amplitude-rise detection: onset = rise above local baseline, not first
-    sample above an absolute floor."""
-
-    def test_silence_no_onset(self):
-        assert _eval(np.zeros(200))["onset_found"] is False
-
-    def test_clean_attack_from_silence_detected(self):
-        # Pre-roll of silence, single impulse at sample 50.
-        # baseline from samples 0–14 = 0; dyn_threshold = 0.02.
-        # abs(audio[50]) = 0.5 >= 0.02 → onset found at sample 50.
-        audio = np.zeros(200)
-        audio[50] = 0.5
-        result = _eval(audio)
-        assert result["onset_found"] is True
-        assert result["onset_sample"] == 50
-
-    def test_clean_step_attack_detected_at_rise(self):
-        # 30 samples of silence, then a step to 0.3 at sample 30.
-        # baseline = 0; dyn_threshold = 0.02; onset at sample 30.
-        audio = np.zeros(200)
-        audio[30:] = 0.3
-        result = _eval(audio)
-        assert result["onset_found"] is True
-        assert result["onset_sample"] == 30
-
-    def test_sustained_signal_above_floor_is_not_onset(self):
-        # A constant signal at 0.05 (above the 0.02 absolute floor) fills the
-        # entire window.  Old code would report onset_sample=0.  New code
-        # computes baseline ≈ 0.05, dyn_threshold = 0.125; signal never
-        # exceeds that → onset_found = False.
-        audio = np.full(200, 0.05)
-        assert _eval(audio)["onset_found"] is False
-
-    def test_sustained_louder_signal_is_not_onset(self):
-        # Even a loud constant signal (0.3) is not an onset.
-        audio = np.full(200, 0.3)
-        assert _eval(audio)["onset_found"] is False
-
-    def test_sustained_plus_new_attack_onset_at_attack_not_zero(self):
-        # First 60 samples: sustained resonance at 0.04 (above 0.02 floor).
-        # Samples 60 onward: loud new attack at 0.4.
-        # baseline ≈ 0.04; dyn_threshold = max(0.02, 0.10) = 0.10.
-        # onset at sample 60 (0.4 >= 0.10), NOT at sample 0.
-        audio = np.zeros(200)
-        audio[:60] = 0.04
-        audio[60:] = 0.4
-        result = _eval(audio)
-        assert result["onset_found"] is True
-        assert result["onset_sample"] >= 55   # never reports sample 0
-
-    def test_sustained_plus_attack_onset_near_attack_start(self):
-        # Same setup; onset should land at or very near the attack boundary.
-        audio = np.zeros(200)
-        audio[:60] = 0.04
-        audio[60:] = 0.4
-        result = _eval(audio)
-        assert result["onset_sample"] <= 65   # within a few samples of sample 60
-
-    def test_modest_rise_above_quiet_baseline_is_detected(self):
-        # Low-level background (0.005, below absolute floor) for first 20 samples,
-        # then silence until a modest attack at sample 60.
-        # baseline ≈ 0.005; dyn_threshold = max(0.02, 0.0125) = 0.02.
-        # attack = 0.06 >= 0.02 → detected.
-        audio = np.zeros(200)
-        audio[:20] = 0.005
-        audio[60:] = 0.06
-        result = _eval(audio)
-        assert result["onset_found"] is True
-        assert result["onset_sample"] >= 55
-
-    def test_onset_sample_is_none_when_no_rise(self):
-        audio = np.full(200, 0.04)
-        assert _eval(audio)["onset_sample"] is None
-
-    def test_onset_time_s_is_none_when_no_rise(self):
-        audio = np.full(200, 0.04)
-        assert _eval(audio)["onset_time_s"] is None
-
-    def test_rms_and_peak_unaffected_by_rise_logic(self):
-        # rms/peak are computed from the raw signal, independent of rise detection.
-        audio = np.full(200, 0.04)
-        result = _eval(audio)
-        assert abs(result["rms"]  - 0.04) < 1e-9
-        assert abs(result["peak"] - 0.04) < 1e-9
-        assert result["onset_found"] is False   # sustained, but rms/peak still valid
-
-    def test_custom_rise_ratio_tighter(self):
-        # With rise_ratio=1.5, the attack needs to be only 1.5× baseline.
-        # Sustained 0.04, attack at 0.07 (1.75× baseline) → detected.
-        audio = np.zeros(200)
-        audio[:30] = 0.04
-        audio[60:] = 0.07
-        result = _eval(audio, rise_ratio=1.5)
-        # dyn_threshold = max(0.02, 0.04×1.5) = 0.06; 0.07 >= 0.06 → onset found
-        assert result["onset_found"] is True
-        assert result["onset_sample"] >= 55
-
-    def test_custom_rise_ratio_looser_misses_weak_attack(self):
-        # With rise_ratio=10, only a very large rise is detected.
-        # Sustained 0.04, attack at 0.07 → NOT detected (0.07 < 0.04×10 = 0.40).
-        audio = np.zeros(200)
-        audio[:30] = 0.04
-        audio[60:] = 0.07
-        result = _eval(audio, rise_ratio=10.0)
-        assert result["onset_found"] is False
+class TestDeterminism:
+    def test_same_inputs_produce_identical_results(self):
+        targets = [1.0, 2.0, 3.0]
+        onsets  = [0.99, 2.01, 2.95]
+        r1 = _eval(targets, onsets)
+        r2 = _eval(targets, onsets)
+        assert r1 == r2
+
+    def test_classification_stable_across_repeated_calls(self):
+        for _ in range(5):
+            r = _single([1.0], [1.050])
+            assert r.classification == "late"
+
+
+# ── signed_error_ms convention ────────────────────────────────────────────────
+
+class TestSignedErrorConvention:
+    def test_late_onset_gives_positive_error(self):
+        assert _single([1.0], [1.050]).signed_error_ms > 0
+
+    def test_early_onset_gives_negative_error(self):
+        assert _single([1.0], [0.950]).signed_error_ms < 0
+
+    def test_error_magnitude_correct(self):
+        r = _single([1.0], [1.045])
+        assert r.signed_error_ms == pytest.approx(45.0)
+
+    def test_error_zero_for_exact_match(self):
+        assert _single([2.5], [2.5]).signed_error_ms == pytest.approx(0.0)
+
+
+# ── matched_onset_index ───────────────────────────────────────────────────────
+
+class TestMatchedOnsetIndex:
+    def test_index_0_for_single_onset(self):
+        assert _single([1.0], [1.0]).matched_onset_index == 0
+
+    def test_index_points_to_correct_onset_time(self):
+        onsets = [0.5, 1.0, 1.5]
+        r = _single([1.0], onsets)
+        assert onsets[r.matched_onset_index] == pytest.approx(r.actual_time_s)
+
+    def test_index_for_second_onset(self):
+        # Onset 0 at 0.5 (far), onset 1 at 1.0 (exact) → index 1
+        r = _single([1.0], [0.5, 1.0])
+        assert r.matched_onset_index == 1
+
+    def test_original_index_preserved_when_input_unsorted(self):
+        # onsets[0]=1.5 (far), onsets[1]=1.0 (exact) → original index 1 returned
+        r = _single([1.0], [1.5, 1.0])
+        assert r.matched_onset_index == 1
+
+
+# ── Multiple targets, multiple onsets ────────────────────────────────────────
+
+class TestMultipleTargetsOnsets:
+    def test_three_targets_three_onsets_all_on_time(self):
+        results = _eval([1.0, 2.0, 3.0], [1.005, 2.010, 2.995])
+        assert all(r.classification == "on_time" for r in results)
+
+    def test_extra_onsets_ignored(self):
+        # More onsets than targets; surplus onsets produce no output entries.
+        results = _eval([1.0], [0.5, 1.0, 1.5])
+        assert len(results) == 1
+        assert results[0].classification  == "on_time"
+        assert results[0].matched_onset_index == 1
+
+    def test_earlier_target_has_first_claim_on_shared_onset(self):
+        # Onset at 1.02 is within tolerance of both target 1.0 and target 1.05.
+        results = _eval([1.0, 1.05], [1.02], tolerance_s=0.08)
+        assert results[0].classification != "miss"
+        assert results[1].classification == "miss"
+
+    def test_mixed_classifications_correct(self):
+        # target 0 → on_time (10 ms); target 1 → late (50 ms);
+        # target 2 → miss (onset at 5.0 s is 2 s away);
+        # target 3 → miss (no onset remaining)
+        targets = [1.0, 2.0, 3.0, 4.0]
+        onsets  = [1.01, 2.05, 5.00]
+        results = _eval(targets, onsets)
+        assert results[0].classification == "on_time"
+        assert results[1].classification == "late"
+        assert results[2].classification == "miss"
+        assert results[3].classification == "miss"
+
+
+# ── Custom tolerance and threshold ────────────────────────────────────────────
+
+class TestCustomParameters:
+    def test_tight_tolerance_causes_miss(self):
+        # 40 ms late; tolerance only 30 ms → miss
+        r = _single([1.0], [1.040], tolerance_s=0.03)
+        assert r.classification == "miss"
+
+    def test_wider_on_time_threshold_reclassifies_as_on_time(self):
+        # 50 ms late; threshold raised to 60 ms → on_time
+        r = _single([1.0], [1.050], on_time_threshold_s=0.06)
+        assert r.classification == "on_time"
+
+    def test_narrower_on_time_threshold_reclassifies_as_late(self):
+        # 20 ms late; threshold narrowed to 10 ms → late
+        r = _single([1.0], [1.020], on_time_threshold_s=0.01)
+        assert r.classification == "late"

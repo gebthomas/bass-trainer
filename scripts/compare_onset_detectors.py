@@ -25,7 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.audio_windows import extract_target_window
-from core.realtime_evaluator import evaluate_window
+from core.window_analyzer import evaluate_window
 from core.timing_policy import match_window_s as _canonical_match_window
 from scripts.offline_onset_analyzer import beat_grid, match_beats_to_onsets
 

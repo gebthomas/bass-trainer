@@ -10,7 +10,7 @@ import numpy as np
 from core.audio_windows import extract_target_window
 from core.feedback_events import feedback_event
 from core.practice_session import PracticeSession
-from core.realtime_evaluator import evaluate_window
+from core.window_analyzer import evaluate_window
 from core.tempo_tracker import TempoTracker
 
 # Fraction of one beat used as the default maximum window shift.
