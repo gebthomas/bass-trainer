@@ -15,3 +15,4 @@ tests/real_audio/jazz/practice_*.wav
 tests/real_audio/jazz/practice_loop/*
 !tests/real_audio/jazz/practice_reference_bass.wav
 !tests/real_audio/jazz/practice_reference_stereo.wav
+diagnostics/*
