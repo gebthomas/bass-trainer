@@ -52,6 +52,7 @@ from core.session_log import (
 from core.session_store import SessionStoreConfig
 from core.session_store import save_session_log as _store_save
 from core.tempo_tracker import TempoTracker
+from core.timing_policy import match_window_s as _match_window_s
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -445,11 +446,12 @@ def _persist_session_log(
         ended_at       = ended_at,
         events         = events,
         metadata       = {
-            "bpm":      str(bpm),
-            "count_in": str(count_in),
-            "beats":    str(len(targets)),
-            "device":   device_label,
-            "detector": "live_rise_based",
+            "bpm":            str(bpm),
+            "count_in":       str(count_in),
+            "beats":          str(len(targets)),
+            "device":         device_label,
+            "detector":       "live_rise_based",
+            "match_window_s": str(_match_window_s(bpm)),
         },
     )
     m = compute_log_metrics(log)

@@ -52,6 +52,7 @@ from core.session_log import (
     SessionLog,
     load_session_log_file,
 )
+from core.timing_policy import match_window_s
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -248,6 +249,42 @@ def scenario_from_session_file(path: str | Path) -> TimingScenario:
     Uses core.session_log.load_session_log_file() — no manual JSON parsing.
     """
     return scenario_from_session_log(load_session_log_file(path))
+
+
+def session_tolerance_s(log: SessionLog) -> float | None:
+    """Return the best available match tolerance for *log*, or ``None``.
+
+    Resolution order (first valid value wins):
+
+    1. ``log.metadata["match_window_s"]`` — the exact window persisted at
+       session-creation time.
+    2. ``match_window_s(log.metadata["bpm"])`` — BPM-derived fallback for
+       older logs that pre-date the ``match_window_s`` metadata key.
+
+    Returns ``None`` without raising when neither key yields a valid positive
+    number.
+    """
+    # 1. Explicit match_window_s stored at session creation.
+    raw_mw = log.metadata.get("match_window_s", "")
+    if raw_mw:
+        try:
+            w = float(raw_mw)
+            if w > 0:
+                return w
+        except (ValueError, TypeError):
+            pass
+
+    # 2. BPM-derived fallback.
+    raw_bpm = log.metadata.get("bpm", "")
+    if not raw_bpm:
+        return None
+    try:
+        bpm = float(raw_bpm)
+    except (ValueError, TypeError):
+        return None
+    if bpm <= 0:
+        return None
+    return match_window_s(bpm)
 
 
 # ── Evaluation summary ────────────────────────────────────────────────────────
@@ -603,8 +640,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--tolerance-ms", type=float,
-        default=_DEFAULT_TOLERANCE_S * 1000, dest="tolerance_ms",
-        help="Match tolerance in ms",
+        default=None, dest="tolerance_ms",
+        help=(
+            "Match tolerance in ms.  When omitted in session-file mode, "
+            "defaults to half a beat derived from the session BPM "
+            f"(or {_DEFAULT_TOLERANCE_S * 1000:.0f} ms when BPM is unavailable).  "
+            "In demo mode defaults to "
+            f"{_DEFAULT_TOLERANCE_S * 1000:.0f} ms."
+        ),
     )
     p.add_argument(
         "--on-time-ms", type=float,
@@ -617,8 +660,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    tolerance_s = args.tolerance_ms / 1000.0
-    on_time_s   = args.on_time_ms   / 1000.0
+    on_time_s = args.on_time_ms / 1000.0
 
     if args.file is not None:
         # ── Session-file mode ──────────────────────────────────────────────
@@ -626,11 +668,23 @@ def main() -> None:
         if not path.exists():
             print(f"Error: file not found: {path}", file=sys.stderr)
             sys.exit(1)
-        rows = [scenario_from_session_file(path)]
+        log  = load_session_log_file(path)
+        rows = [scenario_from_session_log(log)]
+
+        if args.tolerance_ms is not None:
+            tolerance_s = args.tolerance_ms / 1000.0
+        else:
+            tol = session_tolerance_s(log)
+            tolerance_s = tol if tol is not None else _DEFAULT_TOLERANCE_S
     else:
         # ── Demo mode ─────────────────────────────────────────────────────
         keys = list(_ALL_SCENARIOS) if "all" in args.scenario else args.scenario
         rows = [_ALL_SCENARIOS[k]() for k in keys]
+        tolerance_s = (
+            args.tolerance_ms / 1000.0
+            if args.tolerance_ms is not None
+            else _DEFAULT_TOLERANCE_S
+        )
 
     fig = build_figure(rows, tolerance_s=tolerance_s, on_time_s=on_time_s)
     out = save_figure(fig, args.output)

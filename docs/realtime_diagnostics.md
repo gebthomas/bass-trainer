@@ -198,11 +198,16 @@ from plot_session_timeline import (
     EvaluationSummary,          # NamedTuple: n_targets, n_on_time, ..., mean_signed_error_ms
     scenario_from_session_log,  # SessionLog → TimingScenario
     scenario_from_session_file, # path → TimingScenario
+    session_tolerance_s,        # SessionLog → float | None  (BPM-derived tolerance)
     build_figure,               # list[TimingScenario] → plt.Figure
     save_figure,                # (fig, path) → resolved Path
     summarize_evaluations,      # (evals, onset_times_s) → EvaluationSummary
 )
 ```
+
+`session_tolerance_s(log)` reads `log.metadata["bpm"]` and returns
+`match_window_s(bpm)` when the value is a valid positive number; returns
+`None` for a missing key, non-numeric string, zero, or negative BPM.
 
 `build_figure()` calls `evaluate_targets()` internally.  Callers supply raw
 arrays; they do not supply pre-computed evaluations.
@@ -223,14 +228,30 @@ files and prints their paths.
 ```python
 from session_diagnostic_report import (
     derive_output_paths,    # (session_path, out_dir) → (png_path, txt_path)
-    format_summary_text,    # (path, scenario, summary, tol_ms, on_time_ms) → str
-    generate_report,        # (session_path, *, out_dir, tolerance_ms, on_time_ms) → (Path, Path)
+    format_summary_text,    # (path, scenario, summary, tol_ms, on_time_ms, tolerance_source="") → str
+    generate_report,        # (session_path, *, out_dir, tolerance_ms=None, on_time_ms) → (Path, Path)
 )
 ```
 
-`generate_report()` calls `scenario_from_session_file()` → `evaluate_targets()`
+`generate_report()` calls `load_session_log_file()` → `scenario_from_session_log()`
+→ evaluates tolerance using the resolution order below → `evaluate_targets()`
 → `summarize_evaluations()` → `build_figure()` → `save_figure()` →
 `format_summary_text()`.  It does not contain any evaluation logic of its own.
+
+**Tolerance resolution in `generate_report()` (first valid source wins):**
+
+| Priority | Condition | Effective tolerance | `tolerance_source` label |
+|----------|-----------|--------------------|-----------------------|
+| 1 | `tolerance_ms` explicitly given | that value | `"explicit"` |
+| 2 | `metadata["match_window_s"]` valid and positive | that value | `"session metadata match_window_s"` |
+| 3 | `metadata["bpm"]` valid and positive | `match_window_s(bpm)` | `"session BPM (BPM)"` |
+| 4 | none of the above | 80 ms flat | `"fallback default"` |
+
+`session_tolerance_s(log)` in `plot_session_timeline.py` implements the same
+priority (tiers 2–3) for use by the CLI `main()` in session-file mode.
+
+`format_summary_text()` includes a `Tolerance source:` line in the report when
+`tolerance_source` is non-empty.
 
 ---
 
@@ -321,20 +342,43 @@ path).
 objects.  This makes it safe to pass them through multiple layers (plotting,
 summarisation, formatting) without defensive copying.
 
-### Re-evaluation under configurable tolerance
+### Persisted match window and tolerance defaulting
 
-The diagnostic scripts re-run `evaluate_targets()` on the extracted arrays
-using their own configurable tolerance window (default 80 ms flat).  They do
-**not** replay the original live-session classifications.
+**Where `match_window_s` is written**
 
-The live session uses `match_window_s(bpm)` from `core/timing_policy.py`,
-approximately `30 / bpm` seconds (≈ 250 ms at 120 BPM).  A hit that was
-accepted live at 150 ms late may appear as a miss in the diagnostic plot at the
-default 80 ms window.  This is intentional: the diagnostic tool is for
-exploring how a session would look under different acceptance criteria, not
-for reproducing the session result exactly.
+Two session-creation sites now store the exact match window used for event
+classification as `SessionLog.metadata["match_window_s"]` (a string-encoded
+float in seconds):
 
-To reproduce the original tolerance, pass `--tolerance-ms $(python -c "print(30000/BPM)")`.
+| Site | Source of the value |
+|------|---------------------|
+| `core/session_runner.run_session_bundle()` | `_default_match_window(bundle)` — `match_window_s(exercise.bpm)` or `match_window_s(estimated_bpm(alignment))` |
+| `scripts/live_feedback_demo.py` | `match_window_s(bpm)` using the BPM passed to the session |
+
+This means every newly created log carries the window it was evaluated with,
+so future diagnostics can reproduce the original policy exactly without relying
+on a `match_window_s()` re-computation that might return a different value if
+`timing_policy.py` ever changes.
+
+**Diagnostic tolerance resolution order**
+
+When `--tolerance-ms` is not passed explicitly, `session_tolerance_s(log)` in
+`plot_session_timeline.py` and the inline resolution in `generate_report()` both
+use the following priority (first valid value wins):
+
+1. `metadata["match_window_s"]` — exact window persisted at creation time
+2. `match_window_s(metadata["bpm"])` — BPM-derived fallback for older logs that
+   pre-date the `match_window_s` metadata key
+3. `None` / 80 ms flat fallback (when neither key is present or valid)
+
+An explicit `--tolerance-ms` override always wins over all three tiers.
+
+`generate_report()` labels each source in the `Tolerance source:` line of the
+plain-text summary so it is always clear which policy was applied.
+
+Previously the diagnostic default was a flat 80 ms regardless of session tempo,
+a 3× gap vs. the live engine's ≈ 250 ms at 120 BPM that caused live hits to
+appear as diagnostic misses.
 
 ### Agg/save-only plotting
 
@@ -358,10 +402,14 @@ alone.  Pitch error, note identity, and dynamic level are not captured in the
 diagnostic output, even though `SessionEvent` has a `value` field that could
 carry pitch data and `TargetEvaluation` could be extended with pitch fields.
 
-**Diagnostic tolerance differs from live-session tolerance.**  Using the
-default 80 ms diagnostic window on a session that was evaluated at 250 ms
-(120 BPM) will misclassify borderline hits as misses.  See the design decision
-above for how to match the original window.
+**Diagnostic tolerance axis differs from live-session axis.**  The live session
+is onset-first (each onset claims the nearest unclaimed target within the window)
+while `evaluate_targets()` is target-first (each target claims the nearest
+unconsumed onset).  For typical sessions the outcomes are identical; they diverge
+only when a single onset falls equidistant between two close targets.  The
+default tolerance now matches the live engine's `match_window_s(bpm)`, so the
+*tolerance window* no longer causes false misses, but the axis difference remains
+a minor theoretical discrepancy.
 
 **Save-only; no interactive plot.**  `plot_session_timeline.py` cannot display
 an interactive window.  Switching to an interactive backend would require

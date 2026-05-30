@@ -400,10 +400,14 @@ class TestCLIArgParsing:
         args = _parse_args(["session.json", "--on-time-ms", "20"])
         assert args.on_time_ms == pytest.approx(20.0)
 
-    def test_defaults_match_module_constants(self):
+    def test_tolerance_ms_default_is_none(self):
+        # Default is None so generate_report() can auto-detect from session BPM.
         args = _parse_args(["session.json"])
-        assert args.tolerance_ms == pytest.approx(_DEFAULT_TOLERANCE_MS)
-        assert args.on_time_ms   == pytest.approx(_DEFAULT_ON_TIME_MS)
+        assert args.tolerance_ms is None
+
+    def test_on_time_ms_default_matches_constant(self):
+        args = _parse_args(["session.json"])
+        assert args.on_time_ms == pytest.approx(_DEFAULT_ON_TIME_MS)
 
     def test_all_flags_together(self):
         args = _parse_args([

@@ -97,8 +97,8 @@ def run_session_bundle(
     target_times = bundle_target_audio_times(bundle)
     onsets       = sorted(onset_times_sec)
 
+    window = _default_match_window(bundle)
     if target_times and onsets:
-        window             = _default_match_window(bundle)
         target_to_onset, matched_onset_idxs = _match(target_times, onsets, window)
     else:
         target_to_onset      = {}
@@ -149,6 +149,9 @@ def run_session_bundle(
             "targets_hit":    n_hits,
             "targets_missed": n_misses,
             "extra_onsets":   n_extras,
+        },
+        metadata       = {
+            "match_window_s": str(window),
         },
     )
     validate_session_log(log)

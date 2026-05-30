@@ -45,13 +45,16 @@ from plot_session_timeline import (
     _DEFAULT_TOLERANCE_S,
     build_figure,
     save_figure,
-    scenario_from_session_file,
+    scenario_from_session_log,
+    session_tolerance_s,
     summarize_evaluations,
 )
 
 import matplotlib.pyplot as plt  # backend already configured by the import above
 
 from core.realtime_evaluator import evaluate_targets
+from core.session_log import load_session_log_file
+from core.timing_policy import match_window_s
 
 _DEFAULT_TOLERANCE_MS = _DEFAULT_TOLERANCE_S * 1000   # 80 ms
 _DEFAULT_ON_TIME_MS   = _DEFAULT_ON_TIME_S   * 1000   # 30 ms
@@ -95,11 +98,19 @@ def format_summary_text(
     summary: EvaluationSummary,
     tolerance_ms: float,
     on_time_ms: float,
+    tolerance_source: str = "",
 ) -> str:
     """Return a deterministic plain-text report as a single string.
 
     Error stats are shown as ``—`` when all targets are misses (no matched
     onsets to compute from).
+
+    Parameters
+    ----------
+    tolerance_source
+        Optional human-readable label for how the tolerance was chosen
+        (e.g. ``"session BPM (120.0)"``, ``"explicit"``, ``"fallback default"``).
+        When non-empty a ``Tolerance source`` line is added to the report.
     """
     def _ms_signed(v: float | None) -> str:
         return f"{v:+.1f} ms" if v is not None else "—"
@@ -113,6 +124,11 @@ def format_summary_text(
     n            = summary.n_targets
     hit_rate_pct = 100 * (n - summary.n_miss) / n if n else 0.0
 
+    tol_lines = [f"Match tolerance:    {tolerance_ms:.1f} ms"]
+    if tolerance_source:
+        tol_lines.append(f"Tolerance source:   {tolerance_source}")
+    tol_lines.append(f"On-time window:     {on_time_ms:.1f} ms")
+
     lines = [
         "Bass Trainer — Session Diagnostic Report",
         "=" * 41,
@@ -122,8 +138,7 @@ def format_summary_text(
         "",
         "Tolerance settings",
         "-" * 18,
-        f"Match tolerance:    {tolerance_ms:.1f} ms",
-        f"On-time window:     {on_time_ms:.1f} ms",
+        *tol_lines,
         "",
         "Evaluation summary",
         "-" * 18,
@@ -150,7 +165,7 @@ def generate_report(
     session_path: str | Path,
     *,
     out_dir: str | Path | None = None,
-    tolerance_ms: float = _DEFAULT_TOLERANCE_MS,
+    tolerance_ms: float | None = None,
     on_time_ms: float = _DEFAULT_ON_TIME_MS,
 ) -> tuple[Path, Path]:
     """Generate the timeline PNG and text summary for one session log.
@@ -161,19 +176,54 @@ def generate_report(
         Input ``.session.json`` file.
     out_dir
         Output directory.  Defaults to the session file's parent.
-    tolerance_ms, on_time_ms
-        Evaluation window parameters in milliseconds.
+    tolerance_ms
+        Match tolerance in ms.  When ``None`` (the default), the tolerance is
+        derived from the session BPM via ``match_window_s(bpm)`` when available,
+        otherwise the flat 80 ms fallback is used.  An explicit value always
+        takes precedence.
+    on_time_ms
+        On-time classification threshold in ms.
 
     Returns
     -------
     (png_path, txt_path)
         Resolved absolute paths of the two written files.
     """
-    tolerance_s = tolerance_ms / 1000.0
-    on_time_s   = on_time_ms   / 1000.0
+    log      = load_session_log_file(session_path)
+    scenario = scenario_from_session_log(log)
 
-    scenario = scenario_from_session_file(session_path)
-    evals    = evaluate_targets(
+    if tolerance_ms is not None:
+        effective_tolerance_ms = tolerance_ms
+        tolerance_source = "explicit"
+    else:
+        # Three-tier resolution — most specific source wins.
+        raw_mw = log.metadata.get("match_window_s", "")
+        try:
+            mw_s = float(raw_mw) if raw_mw else 0.0
+        except (ValueError, TypeError):
+            mw_s = 0.0
+
+        if mw_s > 0:
+            effective_tolerance_ms = mw_s * 1000.0
+            tolerance_source = "session metadata match_window_s"
+        else:
+            raw_bpm = log.metadata.get("bpm", "")
+            try:
+                bpm = float(raw_bpm) if raw_bpm else 0.0
+            except (ValueError, TypeError):
+                bpm = 0.0
+
+            if bpm > 0:
+                effective_tolerance_ms = match_window_s(bpm) * 1000.0
+                tolerance_source = f"session BPM ({raw_bpm})"
+            else:
+                effective_tolerance_ms = _DEFAULT_TOLERANCE_MS
+                tolerance_source = "fallback default"
+
+    tolerance_s = effective_tolerance_ms / 1000.0
+    on_time_s   = on_time_ms / 1000.0
+
+    evals   = evaluate_targets(
         scenario.target_times_s,
         scenario.onset_times_s,
         tolerance_s         = tolerance_s,
@@ -191,7 +241,9 @@ def generate_report(
     # Plain-text summary
     txt_path.parent.mkdir(parents=True, exist_ok=True)
     text = format_summary_text(
-        session_path, scenario, summary, tolerance_ms, on_time_ms
+        session_path, scenario, summary,
+        effective_tolerance_ms, on_time_ms,
+        tolerance_source=tolerance_source,
     )
     txt_path.write_text(text, encoding="utf-8")
     txt_out = txt_path.resolve()
@@ -220,8 +272,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--tolerance-ms", type=float, default=_DEFAULT_TOLERANCE_MS,
-        dest="tolerance_ms", help="Match tolerance in ms.",
+        "--tolerance-ms", type=float, default=None,
+        dest="tolerance_ms",
+        help=(
+            "Match tolerance in ms.  When omitted, defaults to half a beat "
+            "derived from the session BPM "
+            f"(or {_DEFAULT_TOLERANCE_MS:.0f} ms when BPM is unavailable)."
+        ),
     )
     p.add_argument(
         "--on-time-ms", type=float, default=_DEFAULT_ON_TIME_MS,
