@@ -1,27 +1,23 @@
-"""Tests for pocket_lab_inspect pure helpers."""
-
-import sys
-from pathlib import Path
+"""Tests for pocket_lab pure helpers."""
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
-from pocket_lab_inspect import (
-    GridLine,
-    OnsetClassification,
+from pocket_lab.audio import (
     audio_diagnostics,
-    classify_onset_against_grid,
     compute_overview,
-    estimate_beat_zero,
-    filter_onsets_for_phase,
-    load_grid_settings,
-    make_grid,
-    save_grid_settings,
     segment_audio,
     window_tag,
 )
+from pocket_lab.grid import (
+    GridLine,
+    OnsetClassification,
+    classify_onset_against_grid,
+    make_grid,
+)
+from pocket_lab.grid_phase import estimate_beat_zero, filter_onsets_for_phase
+from pocket_lab.grid_settings import GridSource, load_grid_settings, save_grid_settings
+from pocket_lab.report import render_report
 
 
 # ── make_grid tests ──────────────────────────────────────────────────────────
@@ -430,12 +426,6 @@ class TestReportHTMLStructure:
 
     @pytest.fixture()
     def report_html(self):
-        from pocket_lab_inspect import (
-            GRID_SOURCE_FIXED_BPM,
-            render_report,
-            make_grid,
-            classify_onset_against_grid,
-        )
         sr = 44100
         audio = np.zeros(sr * 2, dtype=np.float32)
         onset_times = np.array([0.5, 1.0, 1.5])
@@ -494,12 +484,7 @@ class TestReportHTMLStructure:
         assert "short windows" in report_html
 
     def test_overview_with_navigation(self):
-        from pocket_lab_inspect import (
-            GRID_SOURCE_FIXED_BPM,
-            render_report,
-            make_grid,
-            classify_onset_against_grid,
-        )
+
         sr = 44100
         audio = np.zeros(sr * 2, dtype=np.float32)
         onset_times = np.array([0.5, 1.0])
@@ -571,7 +556,7 @@ class TestGridSettings:
 
     def test_beat_zero_overrides_auto_phase(self):
         """Manual beat_zero_s should produce manual_beat_zero method, not auto."""
-        from pocket_lab_inspect import render_report, GridSource
+
         sr = 44100
         audio = np.zeros(sr, dtype=np.float32)
         onset_times = np.array([0.5])
@@ -606,7 +591,7 @@ class TestGridSettings:
         assert gs["beat_zero_s"] == 0.5
 
     def test_report_shows_beat_zero_always(self):
-        from pocket_lab_inspect import render_report
+
         sr = 44100
         audio = np.zeros(sr, dtype=np.float32)
         grid = make_grid(bpm=120, beats_per_measure=4, n_measures=1)
@@ -625,7 +610,7 @@ class TestGridSettings:
         assert "0.0000s" in h
 
     def test_report_has_shift_suggestions(self):
-        from pocket_lab_inspect import render_report
+
         sr = 44100
         audio = np.zeros(sr, dtype=np.float32)
         grid = make_grid(bpm=120, beats_per_measure=4, n_measures=1, offset=1.0)
@@ -647,7 +632,7 @@ class TestGridSettings:
         assert "export-grid-settings" in h
 
     def test_report_has_calibration_ui(self):
-        from pocket_lab_inspect import render_report
+
         sr = 44100
         audio = np.zeros(sr, dtype=np.float32)
         grid = make_grid(bpm=120, beats_per_measure=4, n_measures=1)
@@ -675,7 +660,7 @@ class TestGridSettings:
         assert 'id="beat-zero-input"' in h
 
     def test_beat_zero_hidden_in_advanced(self):
-        from pocket_lab_inspect import render_report
+
         sr = 44100
         audio = np.zeros(sr, dtype=np.float32)
         grid = make_grid(bpm=120, beats_per_measure=4, n_measures=1)
@@ -694,7 +679,7 @@ class TestGridSettings:
         assert details_start < beat_zero_input
 
     def test_report_has_suggested_phase_language(self):
-        from pocket_lab_inspect import render_report, GridSource
+
         gs = GridSource(
             method="suggested_phase_from_bass_anchors",
             description=(

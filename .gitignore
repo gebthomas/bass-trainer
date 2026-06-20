@@ -16,3 +16,17 @@ tests/real_audio/jazz/practice_loop/*
 !tests/real_audio/jazz/practice_reference_bass.wav
 !tests/real_audio/jazz/practice_reference_stereo.wav
 diagnostics/*
+# Local Python virtual environments
+.venv/
+.venv-demucs/
+venv/
+env/
+
+# Demucs outputs and local audio artifacts
+separated/
+*.wav
+*.mp3
+*.flac
+*.aiff
+*.aif
+*.m4a
