@@ -30,3 +30,20 @@ separated/
 *.aiff
 *.aif
 *.m4a
+
+# macOS
+.DS_Store
+
+# Generated analysis
+*.png
+*.html
+*.csv
+
+# Audio archives
+*.zip
+
+# Music analysis outputs
+music-library/**/phase_*.csv
+music-library/**/phase_*.html
+music-library/**/groove_*.csv
+music-library/**/beat_times.csv
