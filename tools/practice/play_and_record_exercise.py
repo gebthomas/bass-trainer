@@ -32,7 +32,7 @@ from numpy.fft import rfft, rfftfreq
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from tools.render_practice_track import render_track, _beat_sample
+from tools.practice.render_practice_track import render_track, _beat_sample
 
 
 # ── Progression helpers ───────────────────────────────────────────────────────

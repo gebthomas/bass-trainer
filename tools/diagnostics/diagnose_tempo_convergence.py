@@ -5,7 +5,7 @@ Reproduces the observed failure: script at 120 BPM, player at 132 BPM,
 tracker reports ~121 BPM after 48 beats.
 
 Run from the project root:
-    python tools/diagnose_tempo_convergence.py
+    python tools/diagnostics/diagnose_tempo_convergence.py
 
 Three scenarios
 ---------------

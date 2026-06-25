@@ -6,7 +6,7 @@ On FAIL or INCONCLUSIVE, retries the same BPM.  After each attempt the user
 can override with r/s/q.
 
 Usage:
-    python tools/practice_loop.py \\
+    python tools/practice/practice_loop.py \\
         tests/targets/jazz/ii_v_i_low_position_quarters.json \\
         --progression tests/progressions/ii_v_i_C_slow.json \\
         --start-bpm 90 \\

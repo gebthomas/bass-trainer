@@ -26,7 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 librosa = pytest.importorskip("librosa")
-from tools.analyze_fast_reference import analyze_target, SAMPLE_RATE
+from tools.audio.analyze_fast_reference import analyze_target, SAMPLE_RATE
 
 
 # ── Snapshot dataclass ────────────────────────────────────────────────────────

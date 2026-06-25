@@ -1,4 +1,4 @@
-"""Tests for the pure helper functions in tools/replay_tempo_tracking.py.
+"""Tests for the pure helper functions in tools/diagnostics/replay_tempo_tracking.py.
 
 All tests are synthetic — no audio hardware.
 
@@ -79,7 +79,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.tempo_tracker import TempoTracker
-from tools.replay_tempo_tracking import (
+from tools.diagnostics.replay_tempo_tracking import (
     export_csv,
     run_replay,
     scenario_exact_nominal,

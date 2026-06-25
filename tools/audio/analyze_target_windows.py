@@ -2,7 +2,7 @@
 Pitch presence diagnostic per target note window.
 
 Usage:
-    python tools/analyze_target_windows.py targets.json audio.wav
+    python tools/audio/analyze_target_windows.py targets.json audio.wav
 """
 
 import sys
@@ -157,7 +157,7 @@ def print_report(results: list[dict], estimated_offset_ms: float | None) -> None
 
 def main() -> int:
     if len(sys.argv) < 3:
-        print("Usage: python tools/analyze_target_windows.py targets.json audio.wav")
+        print("Usage: python tools/audio/analyze_target_windows.py targets.json audio.wav")
         return 1
 
     targets = load_targets(Path(sys.argv[1]))

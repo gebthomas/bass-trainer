@@ -14,7 +14,7 @@ from core.targets import load_targets
 from core.audio_calibration import load_input_latency
 
 # Reuse analysis engine from analyze_fast_reference
-from tools.analyze_fast_reference import analyze_target, annotate_harmony, SAMPLE_RATE
+from tools.audio.analyze_fast_reference import analyze_target, annotate_harmony, SAMPLE_RATE
 
 
 # ── Per-note table ────────────────────────────────────────────────────────────

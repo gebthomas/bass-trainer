@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Diagnose pyin pitch detection across all reference audio files.
 
-Runs the analysis engine from tools/analyze_fast_reference on every known
+Runs the analysis engine from tools/audio/analyze_fast_reference on every known
 (wav, target) pair and prints a summary table.  Highlights undertone events
 (detected pitch ≥ 900c below expected) and overtone events (≥ 900c above).
 Does not modify any algorithm.
 
 Usage:
-    python tools/diagnose_pitch_accuracy.py
-    python tools/diagnose_pitch_accuracy.py --filter A_string
-    python tools/diagnose_pitch_accuracy.py --filter fast
-    python tools/diagnose_pitch_accuracy.py --verbose
+    python tools/diagnostics/diagnose_pitch_accuracy.py
+    python tools/diagnostics/diagnose_pitch_accuracy.py --filter A_string
+    python tools/diagnostics/diagnose_pitch_accuracy.py --filter fast
+    python tools/diagnostics/diagnose_pitch_accuracy.py --verbose
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import librosa
 import numpy as np
 
-from tools.analyze_fast_reference import analyze_target, SAMPLE_RATE
+from tools.audio.analyze_fast_reference import analyze_target, SAMPLE_RATE
 
 
 # ── Manifest ──────────────────────────────────────────────────────────────────

@@ -2,10 +2,10 @@
 Generate target JSON files for bass practice scales.
 
 Usage:
-    python tools/generate_scale_targets.py --root C
-    python tools/generate_scale_targets.py --root F# --bpm 80 --subdivision quarter
-    python tools/generate_scale_targets.py --cycle-fifths
-    python tools/generate_scale_targets.py --cycle-fifths --bpm 72 --output my_scales.json
+    python tools/audio/generate_scale_targets.py --root C
+    python tools/audio/generate_scale_targets.py --root F# --bpm 80 --subdivision quarter
+    python tools/audio/generate_scale_targets.py --cycle-fifths
+    python tools/audio/generate_scale_targets.py --cycle-fifths --bpm 72 --output my_scales.json
 """
 
 import argparse

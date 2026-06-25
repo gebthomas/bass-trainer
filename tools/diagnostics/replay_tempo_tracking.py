@@ -5,15 +5,15 @@ set of built-in scenarios.  All logic is synthetic — no audio hardware require
 
 Usage
 -----
-    python tools/replay_tempo_tracking.py                   # default: fast scenario
-    python tools/replay_tempo_tracking.py --scenario all    # every scenario
-    python tools/replay_tempo_tracking.py --scenario fast --actual-bpm 130 --beats 32
-    python tools/replay_tempo_tracking.py --scenario accel --start-bpm 100 --end-bpm 132
-    python tools/replay_tempo_tracking.py --scenario outlier_late --outlier-offset-ms 350
-    python tools/replay_tempo_tracking.py --scenario missed --missed-beats 5,10,15
-    python tools/replay_tempo_tracking.py --scenario all --csv /tmp/timing_report.csv
-    python tools/replay_tempo_tracking.py --scenario all --summary-only
-    python tools/replay_tempo_tracking.py --scenario fast --no-summary
+    python tools/diagnostics/replay_tempo_tracking.py                   # default: fast scenario
+    python tools/diagnostics/replay_tempo_tracking.py --scenario all    # every scenario
+    python tools/diagnostics/replay_tempo_tracking.py --scenario fast --actual-bpm 130 --beats 32
+    python tools/diagnostics/replay_tempo_tracking.py --scenario accel --start-bpm 100 --end-bpm 132
+    python tools/diagnostics/replay_tempo_tracking.py --scenario outlier_late --outlier-offset-ms 350
+    python tools/diagnostics/replay_tempo_tracking.py --scenario missed --missed-beats 5,10,15
+    python tools/diagnostics/replay_tempo_tracking.py --scenario all --csv /tmp/timing_report.csv
+    python tools/diagnostics/replay_tempo_tracking.py --scenario all --summary-only
+    python tools/diagnostics/replay_tempo_tracking.py --scenario fast --no-summary
 
 Scenarios
 ---------

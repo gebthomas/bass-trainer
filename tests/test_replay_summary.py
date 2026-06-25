@@ -1,4 +1,4 @@
-"""Tests for the compact summary reporting added to tools/replay_tempo_tracking.py.
+"""Tests for the compact summary reporting added to tools/diagnostics/replay_tempo_tracking.py.
 
 Covers:
   - summarize_results() calculations
@@ -72,7 +72,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from tools.replay_tempo_tracking import (
+from tools.diagnostics.replay_tempo_tracking import (
     format_summary,
     main,
     run_replay,

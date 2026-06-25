@@ -1,5 +1,5 @@
 # Usage:
-#   python tools/plot_fast_reference.py <wav> <targets.json> [options]
+#   python tools/plotting/plot_fast_reference.py <wav> <targets.json> [options]
 #
 #   --apply-calibration   load input_latency_ms from config/audio_calibration.json
 #   --target-index N      zoom panels 1–2 around target N (0-based)

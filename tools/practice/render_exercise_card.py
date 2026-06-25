@@ -6,7 +6,7 @@ Displays chord names and scale degrees colour-coded by intended string.
 No note names, fret numbers, or tablature in the compact view.
 
 Usage:
-    python tools/render_exercise_card.py <targets.json> \\
+    python tools/practice/render_exercise_card.py <targets.json> \\
         --progression <progression.json>
 """
 

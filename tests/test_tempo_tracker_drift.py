@@ -63,7 +63,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.tempo_tracker import TempoTracker
-from tools.replay_tempo_tracking import (
+from tools.diagnostics.replay_tempo_tracking import (
     run_replay,
     scenario_exact_nominal,
     scenario_gradual_change,

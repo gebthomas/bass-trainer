@@ -110,7 +110,7 @@ def plot_all(y, times, rms, smoothed_rms, slope, onsets):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python tools/plot_onsets.py path/to/file.wav")
+        print("Usage: python tools/plotting/plot_onsets.py path/to/file.wav")
         return
 
     path = Path(sys.argv[1])

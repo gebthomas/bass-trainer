@@ -5,7 +5,7 @@ Renders the exercise card, waits for Enter, records a stereo session,
 runs jazz exercise analysis, and prints a pass/fail verdict.
 
 Usage:
-    python tools/practice_etude.py \\
+    python tools/practice/practice_etude.py \\
         tests/targets/jazz/ii_v_i_low_position_quarters.json \\
         --progression tests/progressions/ii_v_i_C_slow.json \\
         --bpm 100 \\

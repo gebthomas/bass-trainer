@@ -272,7 +272,7 @@ def plot(times, smoothed, predicted, onsets, threshold, slopes, decay_pass_times
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python tools/plot_decay_model.py path/to/file.wav [path/to/targets.json]")
+        print("Usage: python tools/plotting/plot_decay_model.py path/to/file.wav [path/to/targets.json]")
         return
 
     path = Path(sys.argv[1])
